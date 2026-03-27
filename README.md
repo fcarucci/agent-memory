@@ -9,7 +9,9 @@ No vector DB, no hosted black box: just **Markdown on disk**, a clear **retain �
 - **Two tiers:** **user** memory at `~/.agents/memory/` and **project** memory at `<repo>/memory/` (shared, usually via promotion).
 - **Five memory types**, each in its own file: **experiences**, **world knowledge**, **beliefs**, **reflections**, and **entity summaries**.
 - **Curated master `MEMORY.md`** at scope root—a compact subset of world knowledge, beliefs, and entity summaries suitable for direct inclusion in `AGENTS.md`.
-- **Operations:** remember (guarded write), show/recall (read & search), reflect, maintain, promote (user → project), forget, **migrate** (single → multi-file), **curate** (regenerate master from section files).
+- **Operations:** remember (guarded write), show/recall (read & search), reflect, maintain (including **maintenance-report** for stale / weak-source candidates), promote (user → project), forget, **migrate** (single → multi-file), **curate** (regenerate master from section files).
+- **Procedures vs memory:** durable team **how-tos** belong in **versioned skills / docs / `AGENTS.md`**; `MEMORY.md` stays the **episodic and belief cache** (see **`SKILL.md`** and **`ref/maintain.md`**).
+- **Experience outcomes:** optional `{outcome: …}` / `{evidence: …}` on experiences sharpen **reflect** and put **failures first** in digests (`ref/format.md`, **`ref/reflect.md`**).
 - **Helpers:** recall and management capabilities live under **`skills/memory/scripts/`** (stdlib only, no extra packages). See **`ref/scripts.md`**.
 - **Per-product model presets (integrators):** optional **`hosts.cursor`**, **`hosts.claude`**, **`hosts.codex`** in **`~/.agents/memory/memory-skill.config.json`**, with **`MEMORY_SKILL_HOST`** selecting which block merges at runtime—see [Configuration options](#configuration-options).
 - **Backward compatible:** if only a single `MEMORY.md` exists (legacy layout), loading falls back to that file until section layout is used.

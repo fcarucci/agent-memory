@@ -10,10 +10,11 @@ Supports **digest** and **structured search** (keywords, entities, scopes, dates
 
 ## Management helper
 
-Supports **validation**, **screening**, **guarded append**, **duplicate checks**, **entity extraction**, **confidence updates**, **conflicts**, **pruning**, **summary suggestions**, **promotion**, **forget** (find + delete), **curation**, **config validation**, and **config hints**. Each workflow names the operations and arguments in:
+Supports **validation**, **screening**, **guarded append** (including optional **`--outcome`** / **`--evidence`** on experiences), **duplicate checks**, **entity extraction**, **confidence updates**, **conflicts**, **pruning**, **summary suggestions**, **promotion**, **forget** (find + delete), **curation**, **maintenance-report**, **config validation**, and **config hints**. Each workflow names the operations and arguments in:
 
 - **`ref/retain.md`** — remember / guarded write / auto-reflect
 - **`ref/reflect.md`** / **`ref/reflect-techniques.md`** — reflect
+- **`ref/maintain.md`** — maintain / maintenance-report
 - **`ref/forget.md`** — forget
 - **`ref/promote.md`** — promote
 - **`ref/config.md`** — `memory-skill.config.json`

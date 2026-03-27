@@ -66,7 +66,7 @@ User memory under `~/.agents/memory/` is **created automatically** the first tim
    - Is it the agent's subjective judgment or preference? → **Belief**
 5. **Extract entities:** **extract-entities** with `--text` set to the memory text. Review the candidates and finalize the entity set.
 6. **Check for duplicates** across both scopes: **check-duplicate** with appropriate `--section`, `--candidate`, and `--cross-scope` as needed. If a clear duplicate exists in either scope, do not add a new entry.
-7. Write the final entry via **append-entry**: set `--section`, `--scope user`, and for experiences `--date`, optional `--context`, `--entities`, `--text`. For world knowledge, also pass `--confidence` and `--sources`. For beliefs, also pass `--confidence` and optionally `--formed` / `--updated`.
+7. Write the final entry via **append-entry**: set `--section`, `--scope user`, and for experiences `--date`, optional `--context`, `--entities`, `--text`, and when the episode has a clear end state optional **`--outcome`** (`success` \| `failure` \| `mixed` \| `unknown`) and optional **`--evidence`** (external pointer: issue id, CI id, path — no secrets). For world knowledge, also pass `--confidence` and `--sources`. For beliefs, also pass `--confidence` and optionally `--formed` / `--updated`.
 8. For new beliefs, set initial confidence based on evidence strength:
    - `0.4–0.5`: tentative, based on a single observation
    - `0.6–0.7`: moderate, based on 2+ observations

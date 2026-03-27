@@ -111,6 +111,8 @@ class TestParsing(unittest.TestCase):
         self.assertIn("integration-tests", exp.entities)
         self.assertIn("port-5432", exp.entities)
         self.assertIn("hung indefinitely", exp.text)
+        self.assertIsNone(exp.outcome)
+        self.assertIsNone(exp.evidence)
 
     def test_world_fact_fields(self):
         wf = self.bank.world_knowledge[0]
@@ -452,6 +454,138 @@ class TestAppendEntry(unittest.TestCase):
         self.assertEqual(exp.context, "debug")
         self.assertEqual(exp.entities, ["docker", "postgresql", "redis-cli"])
 
+    def test_append_entry_outcome_and_evidence(self):
+        result = manage.append_entry(
+            self.path,
+            section="experiences",
+            text="CI failed then passed after cache clear.",
+            scope_label="user",
+            date="2026-03-29",
+            context="testing",
+            entities=["ci-pipeline"],
+            outcome="mixed",
+            evidence="run-12345",
+        )
+        self.assertTrue(result["success"], result)
+        self.assertEqual(result.get("outcome"), "mixed")
+        self.assertEqual(result.get("evidence"), "run-12345")
+        bank = recall.parse_memory_file(self.path)
+        exp = bank.experiences[0]
+        self.assertEqual(exp.outcome, "mixed")
+        self.assertEqual(exp.evidence, "run-12345")
+
+    def test_append_entry_rejects_invalid_outcome(self):
+        result = manage.append_entry(
+            self.path,
+            section="experiences",
+            text="Narrative only.",
+            scope_label="user",
+            date="2026-03-29",
+            context="testing",
+            entities=["x"],
+            outcome="bogus",
+        )
+        self.assertFalse(result["success"])
+        self.assertIn("Unknown outcome", result["error"])
+
+    def test_append_entry_evidence_sanitizes_braces(self):
+        result = manage.append_entry(
+            self.path,
+            section="experiences",
+            text="Lesson learned.",
+            scope_label="user",
+            date="2026-03-29",
+            context="docs",
+            entities=["docs"],
+            outcome="success",
+            evidence="ticket-42}",
+        )
+        self.assertTrue(result["success"], result)
+        self.assertEqual(result.get("evidence"), "ticket-42")
+        bank = recall.parse_memory_file(self.path)
+        self.assertEqual(bank.experiences[0].evidence, "ticket-42")
+        self.assertIn("{evidence: ticket-42}", bank.experiences[0].raw)
+
+
+class TestNormalizeOutcome(unittest.TestCase):
+    def test_valid_outcomes(self):
+        for o in ("success", "FAILURE", " Mixed "):
+            norm, err = manage.normalize_outcome(o)
+            self.assertIsNone(err)
+            self.assertEqual(norm, o.strip().lower())
+
+    def test_none_and_empty(self):
+        self.assertEqual(manage.normalize_outcome(None), (None, None))
+        self.assertEqual(manage.normalize_outcome("   "), (None, None))
+
+    def test_invalid(self):
+        norm, err = manage.normalize_outcome("win")
+        self.assertIsNone(norm)
+        self.assertIsNotNone(err)
+        self.assertIn("win", err)
+
+
+class TestMaintenanceReport(unittest.TestCase):
+    def test_flags_old_experience_and_low_sources(self):
+        tmp = Path(tempfile.mkdtemp())
+        p = tmp / "MEMORY.md"
+        p.write_text(
+            "# Agent Memory\n\n## Experiences\n\n"
+            "- **2020-01-01** [debug] {entities: legacy} Ancient lesson.\n\n"
+            "## World Knowledge\n\n"
+            "- {entities: x} Solo-sourced fact. (confidence: 0.80, sources: 1)\n\n"
+            "## Beliefs\n\n"
+            "- {entities: y} Old belief. "
+            "(confidence: 0.50, formed: 2020-01-01, updated: 2020-02-01)\n\n"
+            "## Reflections\n\n## Entity Summaries\n",
+            encoding="utf-8",
+        )
+        rep = manage.maintenance_report(
+            memory_file=p,
+            experience_min_age_days=30,
+            belief_stale_days=30,
+            world_max_sources=1,
+        )
+        self.assertTrue(rep["success"])
+        self.assertEqual(rep["counts"]["stale_experiences"], 1)
+        self.assertEqual(rep["counts"]["low_source_world_knowledge"], 1)
+        self.assertEqual(rep["counts"]["stale_beliefs"], 1)
+
+    def test_empty_sections_yield_zero_counts(self):
+        tmp = Path(tempfile.mkdtemp())
+        p = tmp / "MEMORY.md"
+        p.write_text(
+            "# Agent Memory\n\n## Experiences\n\n<!-- c -->\n\n"
+            "## World Knowledge\n\n<!-- c -->\n\n"
+            "## Beliefs\n\n<!-- c -->\n\n"
+            "## Reflections\n\n<!-- c -->\n\n"
+            "## Entity Summaries\n\n<!-- c -->\n",
+            encoding="utf-8",
+        )
+        rep = manage.maintenance_report(memory_file=p)
+        self.assertTrue(rep["success"])
+        self.assertEqual(rep["counts"]["stale_experiences"], 0)
+        self.assertEqual(rep["counts"]["low_source_world_knowledge"], 0)
+        self.assertEqual(rep["counts"]["stale_beliefs"], 0)
+
+    def test_world_knowledge_above_max_sources_not_flagged(self):
+        tmp = Path(tempfile.mkdtemp())
+        p = tmp / "MEMORY.md"
+        p.write_text(
+            "# Agent Memory\n\n## Experiences\n\n<!-- c -->\n\n"
+            "## World Knowledge\n\n"
+            "- {entities: z} Well supported. (confidence: 0.90, sources: 3)\n\n"
+            "## Beliefs\n\n<!-- c -->\n\n"
+            "## Reflections\n\n<!-- c -->\n\n"
+            "## Entity Summaries\n\n<!-- c -->\n",
+            encoding="utf-8",
+        )
+        rep = manage.maintenance_report(
+            memory_file=p,
+            world_max_sources=1,
+        )
+        self.assertEqual(rep["counts"]["low_source_world_knowledge"], 0)
+
 
 class TestPruneBeliefs(unittest.TestCase):
     def setUp(self):
@@ -717,6 +851,20 @@ class TestInitUser(unittest.TestCase):
         self.assertTrue(Path(result["path"]).exists())
 
 
+class TestOutcomeEvidenceParsing(unittest.TestCase):
+    def test_parse_outcome_and_evidence(self):
+        line = (
+            "- **2026-03-28** [testing] {entities: e2e} {outcome: failure} "
+            "{evidence: ci-99} The suite timed out."
+        )
+        exp = recall.parse_experience(line)
+        self.assertEqual(exp.outcome, "failure")
+        self.assertEqual(exp.evidence, "ci-99")
+        self.assertNotIn("{outcome:", exp.text)
+        self.assertNotIn("{evidence:", exp.text)
+        self.assertIn("timed out", exp.text)
+
+
 class TestDigest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -783,6 +931,35 @@ class TestDigest(unittest.TestCase):
         empty = recall.MemoryBank()
         output = recall.digest([("user", empty), ("project", empty)])
         self.assertEqual(output, "(no memories found)")
+
+    def test_digest_orders_failures_before_successes(self):
+        mem = """\
+# Agent Memory
+
+## Experiences
+
+- **2026-03-27** [testing] {entities: a} {outcome: success} All green.
+- **2026-03-26** [testing] {entities: b} {outcome: failure} Build broke.
+
+## World Knowledge
+
+## Beliefs
+
+## Reflections
+
+## Entity Summaries
+"""
+        tmp = Path(tempfile.mkdtemp())
+        p = tmp / "MEMORY.md"
+        p.write_text(mem, encoding="utf-8")
+        bank = recall.parse_memory_file(p)
+        output = recall.digest([("project", bank)], last=2)
+        self.assertIn("failures/mixed listed first", output)
+        section = output.split("**Recent Experiences")[-1]
+        lines = [ln for ln in section.splitlines() if ln.startswith("- 2026-")]
+        self.assertEqual(len(lines), 2)
+        self.assertIn("failure", lines[0])
+        self.assertIn("success", lines[1])
 
 
 CONFLICT_MEMORY = """\

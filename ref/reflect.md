@@ -1,4 +1,6 @@
-# Reflect and Maintain Operations
+# Reflect Operation (`action: reflect`)
+
+> **Maintain** lives in **`ref/maintain.md`** (workflow + **maintenance-report**).
 
 ## Reflect (`action: reflect`)
 
@@ -55,6 +57,25 @@ Reflect runs in two modes:
 | Promotion-worthy (→ World Knowledge) | n/a | Move from Beliefs to World Knowledge at 0.85+ with 3+ sources |
 | Decay (no recent evidence) | -0.01 | Belief is old with no new supporting evidence |
 
+### Outcome-aware adjustments
+
+When an experience includes **`{outcome: failure}`** and the narrative
+**directly contradicts** a belief’s prediction, treat it as **strong
+contradiction** (−0.2) unless the profile or counterfactual analysis
+shows the failure was unrelated (tooling flake, wrong branch, etc.).
+
+When **`{outcome: success}`** on a **reproduced** check that matches what
+the belief claims, treat as **reinforcing** (+0.1); use **mild**
+contradiction (−0.1) only when success is partial or the belief is
+narrower than the evidence.
+
+**`{outcome: mixed}`** — split the narrative into what succeeded vs failed;
+apply the appropriate delta per clause, or default to mild ±0.1 when
+splitting is ambiguous.
+
+Experiences **without** an outcome tag use the same table as before;
+outcome tags sharpen the signal when present.
+
 Beliefs below `0.2` confidence are pruning candidates. If you remove one,
 first make sure the information is either obsolete or preserved elsewhere.
 
@@ -76,22 +97,3 @@ separate explicit promotion decision.
 - Curated master `MEMORY.md` regenerated.
 - Final counts per section.
 
-## Maintain (`action: maintain`)
-
-Run the supported maintenance cycle without adding a new memory:
-
-1. Validate structure.
-2. Review low-confidence beliefs with `prune-beliefs`.
-3. Update belief confidences based on recent evidence.
-4. Check entity summary opportunities with `suggest-summaries`.
-5. Remove duplicates only when you can prove they are duplicates.
-6. Write the updated file.
-7. **Regenerate the curated master:** **curate** with `--scope user`.
-
-### Required output (maintain)
-
-- Beliefs updated or pruned.
-- Duplicates removed, if any.
-- Entity summaries refreshed or suggested.
-- Curated master `MEMORY.md` regenerated.
-- Final counts per section.

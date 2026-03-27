@@ -22,6 +22,12 @@ The digest contains, for each scope with content:
 3. **Entity Summaries** — synthesized entity profiles  
 4. **Recent Experiences** — bounded by `--last N` (default: 5) or `--days N`
 
+Within the experience window, **failures and mixed outcomes are listed
+before successes** (then `unknown` / untagged), and within each bucket
+**newer dates first** — so degradations surface early in context injection.
+Tagged `{outcome: …}` and `{evidence: …}` appear in the digest line when
+present.
+
 Output is plain text, not JSON. Display directly to the user.
 
 ## Recall (`action: recall`)

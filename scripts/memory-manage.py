@@ -19,13 +19,40 @@ import re
 import sys
 import tempfile
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Optional
 
+_VALID_OUTCOMES = frozenset({"success", "failure", "mixed", "unknown"})
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from importlib import import_module
+
 recall_mod = import_module("memory-recall")
+
+
+def normalize_outcome(raw: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Return (normalized_outcome, error_message). *error_message* is set if *raw* is invalid."""
+    if raw is None or not str(raw).strip():
+        return None, None
+    o = str(raw).strip().lower()
+    if o not in _VALID_OUTCOMES:
+        return None, (
+            f"Unknown outcome '{raw}'; use one of: "
+            + ", ".join(sorted(_VALID_OUTCOMES))
+        )
+    return o, None
+
+
+def _sanitize_evidence_fragment(raw: Optional[str]) -> Optional[str]:
+    if raw is None or not str(raw).strip():
+        return None
+    s = str(raw).replace("}", "").replace("\n", " ").strip()
+    if not s:
+        return None
+    return s[:500]
+
 
 def resolve_path(scope: str) -> Path:
     """Return the curated master MEMORY.md for a scope (legacy compat)."""
@@ -1181,6 +1208,121 @@ def curate(scope: str, *, max_world: int = 10, max_beliefs: int = 10,
     }
 
 
+def _parse_iso_date_string(value: Optional[str]) -> Optional[date]:
+    """Parse YYYY-MM-DD or return None if missing or invalid."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _maintenance_text_preview(text: str, max_len: int = 120) -> str:
+    """Single-line preview for maintenance-report JSON (ellipsis when truncated)."""
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + "…"
+
+
+def maintenance_report(
+    *,
+    scope_label: str = "user",
+    memory_file: Optional[Path] = None,
+    experience_min_age_days: int = 90,
+    belief_stale_days: int = 120,
+    world_max_sources: int = 1,
+) -> dict:
+    """List maintenance candidates: old experiences, low-source facts, stale beliefs.
+
+    When *memory_file* is set, parse that single file (legacy or test layout).
+    Otherwise load *scope_label* via the normal master + section-dir path.
+    """
+    if memory_file is not None:
+        bank = recall_mod.parse_memory_file(memory_file)
+        scope_display = "file"
+    else:
+        if scope_label == "user":
+            recall_mod.ensure_user_scope_initialized()
+            master = recall_mod.resolve_user_memory_path()
+        else:
+            master = recall_mod.resolve_project_memory_path()
+        section_dir = recall_mod.resolve_section_dir(scope_label)
+        bank = recall_mod.load_memory(master, section_dir)
+        scope_display = scope_label
+
+    today = date.today()
+
+    stale_experiences: list[dict] = []
+    for i, exp in enumerate(bank.experiences):
+        exp_date = _parse_iso_date_string(exp.date)
+        if exp_date is None:
+            continue
+        if (today - exp_date).days >= experience_min_age_days:
+            stale_experiences.append(
+                {
+                    "section": "experiences",
+                    "index": i,
+                    "date": exp.date,
+                    "outcome": exp.outcome,
+                    "entities": exp.entities,
+                    "text_preview": _maintenance_text_preview(exp.text),
+                    "raw": exp.raw,
+                }
+            )
+
+    low_source_world_knowledge: list[dict] = []
+    for i, wf in enumerate(bank.world_knowledge):
+        if wf.sources is not None and wf.sources <= world_max_sources:
+            low_source_world_knowledge.append(
+                {
+                    "section": "world_knowledge",
+                    "index": i,
+                    "sources": wf.sources,
+                    "confidence": wf.confidence,
+                    "entities": wf.entities,
+                    "text_preview": _maintenance_text_preview(wf.text),
+                    "raw": wf.raw,
+                }
+            )
+
+    stale_beliefs: list[dict] = []
+    for i, b in enumerate(bank.beliefs):
+        upd = _parse_iso_date_string(b.updated)
+        if upd is None:
+            continue
+        if (today - upd).days >= belief_stale_days:
+            stale_beliefs.append(
+                {
+                    "section": "beliefs",
+                    "index": i,
+                    "updated": b.updated,
+                    "confidence": b.confidence,
+                    "entities": b.entities,
+                    "text_preview": _maintenance_text_preview(b.text),
+                    "raw": b.raw,
+                }
+            )
+
+    return {
+        "success": True,
+        "scope": scope_display,
+        "thresholds": {
+            "experience_min_age_days": experience_min_age_days,
+            "belief_stale_days": belief_stale_days,
+            "world_max_sources": world_max_sources,
+        },
+        "stale_experiences": stale_experiences,
+        "low_source_world_knowledge": low_source_world_knowledge,
+        "stale_beliefs": stale_beliefs,
+        "counts": {
+            "stale_experiences": len(stale_experiences),
+            "low_source_world_knowledge": len(low_source_world_knowledge),
+            "stale_beliefs": len(stale_beliefs),
+        },
+    }
+
+
 def _ensure_memory_file(path: Path, scope_label: str) -> Path:
     """Create a template memory file when needed (legacy single-file path)."""
     if path.exists():
@@ -1311,6 +1453,8 @@ def append_entry(
     sources: Optional[int] = None,
     formed: Optional[str] = None,
     updated: Optional[str] = None,
+    outcome: Optional[str] = None,
+    evidence: Optional[str] = None,
     cross_scope_path: Optional[Path] = None,
 ) -> dict:
     """Append a new entry to the per-section file after safety checks.
@@ -1371,6 +1515,11 @@ def append_entry(
             "matches": duplicate["matches"],
         }
 
+    norm_outcome, outcome_err = normalize_outcome(outcome)
+    if outcome_err:
+        return {"success": False, "error": outcome_err}
+    sanitized_evidence = _sanitize_evidence_fragment(evidence)
+
     build_result = _build_entry_line(
         section=section,
         text=screening["sanitized_text"],
@@ -1381,6 +1530,8 @@ def append_entry(
         sources=sources,
         formed=formed,
         updated=updated,
+        outcome=norm_outcome,
+        evidence=sanitized_evidence,
     )
     if "error" in build_result:
         return {"success": False, "error": build_result["error"]}
@@ -1403,6 +1554,8 @@ def append_entry(
         "entry": raw_line,
         "entities": normalized_entities,
         "context": normalized_context,
+        "outcome": norm_outcome,
+        "evidence": sanitized_evidence,
     }
 
 
@@ -1417,6 +1570,8 @@ def _build_entry_line(
     sources: Optional[int],
     formed: Optional[str],
     updated: Optional[str],
+    outcome: Optional[str] = None,
+    evidence: Optional[str] = None,
 ) -> dict:
     """Build one formatted memory line for the target section."""
     if section == "experiences":
@@ -1425,7 +1580,12 @@ def _build_entry_line(
         raw_line = f"- **{date}**"
         if context:
             raw_line += f" [{context}]"
-        raw_line += f" {{entities: {', '.join(entities)}}} {text}"
+        raw_line += f" {{entities: {', '.join(entities)}}}"
+        if outcome:
+            raw_line += f" {{outcome: {outcome}}}"
+        if evidence:
+            raw_line += f" {{evidence: {evidence}}}"
+        raw_line += f" {text}"
     elif section == "world_knowledge":
         if confidence is None or sources is None:
             return {"error": "World knowledge requires confidence and sources"}
@@ -1766,6 +1926,55 @@ def main():
     append_parser.add_argument("--sources", type=int)
     append_parser.add_argument("--formed")
     append_parser.add_argument("--updated")
+    append_parser.add_argument(
+        "--outcome",
+        choices=sorted(_VALID_OUTCOMES),
+        default=None,
+        help="Experiences only: outcome signal (success, failure, mixed, unknown)",
+    )
+    append_parser.add_argument(
+        "--evidence",
+        default=None,
+        help=(
+            "Experiences only: external pointer (issue URL, CI run id); "
+            "no secrets; '}' stripped"
+        ),
+    )
+
+    mr_parser = sub.add_parser(
+        "maintenance-report",
+        help=(
+            "List stale experiences, low-source world knowledge, stale beliefs"
+        ),
+    )
+    mr_parser.add_argument(
+        "--scope", choices=["user", "project"], default="user",
+        help="Ignored when --file is set",
+    )
+    mr_parser.add_argument(
+        "--experience-days",
+        type=int,
+        default=90,
+        help="Experiences older than this many days (default: 90)",
+    )
+    mr_parser.add_argument(
+        "--belief-days",
+        type=int,
+        default=120,
+        help="Beliefs with updated: older than this many days (default: 120)",
+    )
+    mr_parser.add_argument(
+        "--max-sources",
+        type=int,
+        default=1,
+        help="World knowledge with sources <= N (default: 1)",
+    )
+    mr_parser.add_argument(
+        "--file",
+        type=Path,
+        default=None,
+        help="Parse this MEMORY.md only (single-file layout)",
+    )
 
     promote_parser = sub.add_parser("promote", help="Copy a memory from user to project scope")
     promote_parser.add_argument("--section", required=True,
@@ -1929,7 +2138,17 @@ def main():
             sources=args.sources,
             formed=args.formed,
             updated=args.updated,
+            outcome=getattr(args, "outcome", None),
+            evidence=getattr(args, "evidence", None),
             cross_scope_path=resolve_path(other_scope),
+        )
+    elif args.command == "maintenance-report":
+        result = maintenance_report(
+            scope_label=args.scope,
+            memory_file=args.file,
+            experience_min_age_days=args.experience_days,
+            belief_stale_days=args.belief_days,
+            world_max_sources=args.max_sources,
         )
     elif args.command == "promote":
         result = promote(

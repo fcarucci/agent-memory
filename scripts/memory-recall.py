@@ -18,7 +18,7 @@ import json
 import re
 import sys
 from dataclasses import dataclass, field, asdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -40,7 +40,9 @@ SECTION_FILES: dict[str, str] = {
 SECTION_TEMPLATES: dict[str, str] = {
     "experiences": (
         "## Experiences\n\n"
-        "<!-- Newest first. Format: - **YYYY-MM-DD** [context] {entities: e1, e2} Narrative memory text. -->\n"
+        "<!-- Newest first. Format: - **YYYY-MM-DD** [context] {entities: e1, e2} "
+        "optional {outcome: success|failure|mixed|unknown} optional {evidence: ref} "
+        "optional causal tags, then narrative. -->\n"
     ),
     "world_knowledge": (
         "## World Knowledge\n\n"
@@ -117,7 +119,7 @@ LEGACY_SINGLE_FILE_TEMPLATE = """\
 
 ## Experiences
 
-<!-- Newest first. Format: - **YYYY-MM-DD** [context] {entities: e1, e2} Narrative memory text. -->
+<!-- Newest first. Format: - **YYYY-MM-DD** [context] {entities: e1, e2} optional {outcome: ...} optional {evidence: ref} narrative. -->
 
 ## World Knowledge
 
@@ -365,7 +367,12 @@ FORMED_RE = re.compile(r"formed:\s*(\d{4}-\d{2}-\d{2})")
 UPDATED_RE = re.compile(r"updated:\s*(\d{4}-\d{2}-\d{2})")
 CONTEXT_RE = re.compile(r"\[(\w[\w-]*)\]")
 CAUSAL_RE = re.compile(r"\{(causes|caused-by|enables|prevents):\s*([^}]+)\}")
+OUTCOME_RE = re.compile(r"\{outcome:\s*(success|failure|mixed|unknown)\}")
+EVIDENCE_RE = re.compile(r"\{evidence:\s*([^}]+)\}")
 SUMMARY_HEADING_RE = re.compile(r"^###\s+(.+)$")
+
+# Order for digest: surface failures before successes (unknown last with successes bucket edge)
+OUTCOME_DIGEST_PRIORITY = {"failure": 0, "mixed": 1, "success": 2, "unknown": 3}
 
 
 @dataclass
@@ -379,6 +386,8 @@ class Experience:
     context: Optional[str]
     entities: list[str]
     causal_links: list[CausalLink]
+    outcome: Optional[str]  # success | failure | mixed | unknown
+    evidence: Optional[str]  # external pointer, e.g. CI URL or ticket id (no secrets)
     text: str
     raw: str
 
@@ -440,12 +449,24 @@ def strip_metadata(line: str) -> str:
     text = DATE_RE.sub("", text).strip()
     text = CONTEXT_RE.sub("", text, count=1).strip()
     text = ENTITY_RE.sub("", text).strip()
+    text = OUTCOME_RE.sub("", text).strip()
+    text = EVIDENCE_RE.sub("", text).strip()
     text = CAUSAL_RE.sub("", text).strip()
     text = re.sub(r"\(confidence:.*?\)", "", text).strip()
     text = re.sub(r"\(sources:.*?\)", "", text).strip()
     text = re.sub(r"\(formed:.*?\)", "", text).strip()
     text = re.sub(r"\(updated:.*?\)", "", text).strip()
     return text
+
+
+def parse_outcome(line: str) -> Optional[str]:
+    m = OUTCOME_RE.search(line)
+    return m.group(1).lower() if m else None
+
+
+def parse_evidence(line: str) -> Optional[str]:
+    m = EVIDENCE_RE.search(line)
+    return m.group(1).strip() if m else None
 
 
 def parse_experience(line: str) -> Experience:
@@ -456,6 +477,8 @@ def parse_experience(line: str) -> Experience:
         context=ctx_match.group(1) if ctx_match else None,
         entities=parse_entities(line),
         causal_links=parse_causal_links(line),
+        outcome=parse_outcome(line),
+        evidence=parse_evidence(line),
         text=strip_metadata(line),
         raw=line,
     )
@@ -848,16 +871,25 @@ def digest(
         exps = _filter_experiences(bank.experiences, last=last, days=days)
         if exps:
             range_desc = f"last {days} days" if days else f"last {len(exps)}"
-            lines.append(f"**Recent Experiences ({range_desc}):**")
+            lines.append(
+                f"**Recent Experiences ({range_desc}; failures/mixed listed first):**"
+            )
             for exp in exps:
-                date_str = exp.date or "unknown"
-                ctx = f" [{exp.context}]" if exp.context else ""
-                lines.append(f"- {date_str}{ctx}: {exp.text}")
+                lines.append(_format_digest_experience_line(exp))
             lines.append("")
 
     if not lines:
         return "(no memories found)"
     return "\n".join(lines).rstrip()
+
+
+def _format_digest_experience_line(exp: Experience) -> str:
+    """One digest line for an experience (date, tags, narrative)."""
+    date_str = exp.date or "unknown"
+    ctx = f" [{exp.context}]" if exp.context else ""
+    oc = f" [outcome:{exp.outcome}]" if exp.outcome else ""
+    ev = f" [evidence:{exp.evidence}]" if exp.evidence else ""
+    return f"- {date_str}{ctx}{oc}{ev}: {exp.text}"
 
 
 def _filter_experiences(
@@ -868,12 +900,34 @@ def _filter_experiences(
 ) -> list[Experience]:
     """Return recent experiences by count or day range."""
     if days is not None:
-        cutoff = (datetime.now().date() - __import__("datetime").timedelta(days=days))
-        return [
+        cutoff = date.today() - timedelta(days=days)
+        filtered = [
             e for e in experiences
             if e.date and _parse_date(e.date) >= cutoff
         ]
-    return experiences[:last]
+    else:
+        filtered = experiences[:last]
+    return _sort_experiences_for_digest(filtered)
+
+
+def _experience_date_ordinal(exp: Experience) -> int:
+    if not exp.date:
+        return 0
+    try:
+        return _parse_date(exp.date).toordinal()
+    except ValueError:
+        return 0
+
+
+def _sort_experiences_for_digest(experiences: list[Experience]) -> list[Experience]:
+    """Surface failure/mixed outcomes first, then newer dates within each bucket."""
+
+    def sort_key(e: Experience) -> tuple:
+        o = (e.outcome or "").lower()
+        pri = OUTCOME_DIGEST_PRIORITY.get(o, 3)
+        return (pri, -_experience_date_ordinal(e))
+
+    return sorted(experiences, key=sort_key)
 
 
 def _entity_matches(entities: list[str], query: str) -> bool:

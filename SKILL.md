@@ -20,6 +20,7 @@ request to an action, then follow only that action's instructions.
 | "What do you remember?", "Show me memories", "What are your last memories?" | **show** | No | `ref/recall.md` |
 | "What do you know about X?", "Any memories about Y?" | **recall** | No | `ref/recall.md` |
 | "Reflect on your memory", "Dream", "Time for a reflection", "Review your beliefs" | **reflect** | **YES — spawn subagent** | `ref/reflect.md` + `ref/reflect-techniques.md` + `ref/profile.md` |
+| "Maintain memory", "Clean up memory", "Prune stale memories", "Memory hygiene" | **maintain** | **YES — spawn subagent** | `ref/maintain.md` + `ref/reflect.md` (belief rules) |
 | "Forget about X", "Delete that memory", "Remove the belief about Y" | **forget** | No | `ref/forget.md` |
 | "Promote this to the project" | **promote** | **YES — spawn subagent** | `ref/promote.md` |
 
@@ -36,6 +37,8 @@ Read and follow skills/memory/SKILL.md.
 action: remember
 content: <the thing to remember, in the user's words or summarized>
 context: <tag: debug|testing|tooling|workflow|decision|preference|infra|docs|ui|backend|security>
+outcome: <optional: success|failure|mixed|unknown — for clear episode end states>
+evidence: <optional: issue id, CI id, doc path — never secrets>
 ```
 
 The subagent reads SKILL.md, follows the dispatch to `ref/format.md` +
@@ -59,6 +62,16 @@ behavior. Memory should improve future task success, not replace search,
 tests, or tooling. Prefer **no new entry** over accumulating low-signal
 volume. See `ref/retain.md` (outcome-linked transfer, temporal validity)
 and `ref/format.md` (structured episodic traces).
+
+### Procedures vs episodic memory
+
+**`MEMORY.md`** holds **episodic cache**, **verified facts**, **beliefs**,
+and **reflections** — optimized for session-to-session recall. **Durable
+procedures** (checklists, how-tos, conventions many agents must follow)
+should live in **versioned repo skills**, **`AGENTS.md`**, or **docs**
+where they are reviewable in PRs. When a lesson stabilizes, prefer
+**capturing it there** and keeping memory as a pointer or short reminder,
+not a second copy of the full procedure. See `ref/maintain.md`.
 
 ### Two-tier scoping
 
@@ -143,6 +156,8 @@ all", or task done with no follow-up):
 | `action` | yes | `remember`, `recall`, `reflect`, `maintain`, or `promote` |
 | `content` | if remember | Narrative memory candidate |
 | `context` | no | Tag: `debug`, `testing`, `tooling`, `workflow`, `decision`, `preference`, `infra`, `docs`, `ui`, `backend`, `security` |
+| `outcome` | no | Experiences: `success`, `failure`, `mixed`, or `unknown` — sharpens reflect and digest ordering |
+| `evidence` | no | Experiences: external pointer (issue URL, CI id); never secrets — see `ref/format.md` |
 | `query` | if recall | Search terms, entity, or date range |
 | `section` | no | Limit to one section |
 | `scope` | no | `user` (default writes), `project`, or `both` (default reads) |
@@ -207,6 +222,9 @@ Read and follow skills/memory/SKILL.md.
 
 action: maintain
 ```
+
+Follow **`ref/maintain.md`** (validation, **maintenance-report**, belief
+review, curate).
 
 ### Promote (spawn subagent)
 

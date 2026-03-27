@@ -14,7 +14,7 @@ Required structure (same for both files):
 
 ## Experiences
 
-<!-- Newest first. Format: - **YYYY-MM-DD** [context] {entities: e1, e2} Narrative memory text. -->
+<!-- Newest first. Optional {outcome: ...} {evidence: ref}. See Experience format below. -->
 
 ## World Knowledge
 
@@ -71,6 +71,25 @@ Example:
 ```text
 - **2026-03-27** [debug] {entities: ci-pipeline, rust-toolchain} Ran `cargo test` on the default CI image; the job failed because the `wasm32-unknown-unknown` target was missing. Adding an explicit `rustup target add` step (and aligning with the repo toolchain file) fixed the pipeline.
 ```
+
+### Outcome and evidence (experiences)
+
+Optional tags after `{entities: ...}`, before causal tags (if any) and the
+narrative:
+
+| Tag | Values | Use |
+|-----|--------|-----|
+| `{outcome: success}` | `success`, `failure`, `mixed`, `unknown` | Observable end state of the episode — drives **digest ordering** (failures first) and **reflect** weighting (`ref/reflect.md`). |
+| `{evidence: …}` | Short external pointer | **Ticket id**, **CI run id**, or **doc path** — not raw logs or secrets. Lets humans and agents re-open the source without pasting PII or tokens. |
+
+Example:
+
+```text
+- **2026-03-28** [testing] {entities: e2e-suite} {outcome: failure} {evidence: ci-run-18492} E2E timed out waiting for the mock gateway; increasing the startup wait in the harness fixed the flake on retry.
+```
+
+**append-entry** accepts `--outcome` and `--evidence` for experiences; the
+helper injects these tags. Do not put `}` inside the evidence string.
 
 ## Causal links
 
