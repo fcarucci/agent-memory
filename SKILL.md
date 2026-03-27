@@ -148,6 +148,23 @@ all", or task done with no follow-up):
 | `section` | no | Limit to one section |
 | `scope` | no | `user` (default writes), `project`, or `both` (default reads) |
 | `index` | if promote | Index in user memory to promote |
+| `model_preset` | no | Optional opaque model id or preset label for **this** subagent; the host decides how it maps to a real model. If omitted, the orchestrator should use `memory-manage.py config-hints` (see below). |
+
+### Subagent model selection (orchestrator)
+
+Memory Python scripts do not call language models. To use **different models** per subagent action (`remember`, `reflect`, `maintain`, `promote`), configure:
+
+`~/.agents/memory/memory-skill.config.json`
+
+Full schema, defaults, and rationale: **`ref/config.md`**. Example: **`ref/memory-skill.config.example.json`**.
+
+Before spawning a memory subagent, the host may run:
+
+```bash
+python3 skills/memory/scripts/memory-manage.py config-hints
+```
+
+and pass the resolved `model_id` for the matching action (or honor `model_preset` on the subagent payload when the user overrides). Use **`overrides.remember_when_auto_reflect`** when splitting a cheap retain pass from a stronger auto-reflect pass.
 
 ## Invocation examples
 

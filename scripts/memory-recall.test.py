@@ -3,6 +3,7 @@
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -222,6 +223,23 @@ class TestValidation(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("World Knowledge" in e for e in result["errors"]))
 
+    def test_missing_reflections_section_is_invalid(self):
+        p = self.tmp / "missing-reflections.md"
+        p.write_text(
+            "# Agent Memory\n\n"
+            "## Experiences\n\n"
+            "- **2026-03-27** [testing] {entities: x} Something happened during testing.\n\n"
+            "## World Knowledge\n\n"
+            "- {entities: x} A fact. (confidence: 0.90, sources: 1)\n\n"
+            "## Beliefs\n\n"
+            "- {entities: x} A belief. (confidence: 0.50, formed: 2026-03-27, updated: 2026-03-27)\n\n"
+            "## Entity Summaries\n",
+            encoding="utf-8",
+        )
+        result = manage.validate(p)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("Reflections" in e for e in result["errors"]))
+
     def test_nonexistent_file(self):
         result = manage.validate(self.tmp / "nope.md")
         self.assertFalse(result["valid"])
@@ -236,6 +254,7 @@ class TestValidation(unittest.TestCase):
             "- {entities: x} A fact without confidence.\n\n"
             "## Beliefs\n\n"
             "- {entities: x} A belief. (confidence: 0.5)\n\n"
+            "## Reflections\n\n"
             "## Entity Summaries\n"
         )
         result = manage.validate(p)
@@ -1271,6 +1290,75 @@ class TestAppendToSectionFile(unittest.TestCase):
         bank = recall.parse_memory_file(sf)
         self.assertEqual(len(bank.experiences), 3)
 
+    def test_append_from_user_master_uses_user_section_file(self):
+        user_root = self.tmp / "user"
+        user_root.mkdir()
+        user_master = user_root / "MEMORY.md"
+        user_master.write_text(recall.USER_MEMORY_TEMPLATE, encoding="utf-8")
+        recall.ensure_section_files(user_root)
+
+        result = manage.append_entry(
+            user_master,
+            section="experiences",
+            text="User master appends should land in the section file.",
+            scope_label="user",
+            date="2026-03-27",
+            context="testing",
+            entities=["user-append"],
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["path"], str(user_root / "experiences.md"))
+        self.assertNotIn(
+            "User master appends should land in the section file.",
+            user_master.read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            "User master appends should land in the section file.",
+            (user_root / "experiences.md").read_text(encoding="utf-8"),
+        )
+
+
+class TestPromoteWithSectionFiles(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.user_root = self.tmp / "user"
+        self.project_root = self.tmp / "project"
+        self.user_root.mkdir()
+        self.project_root.mkdir()
+        self.user_master = self.user_root / "MEMORY.md"
+        self.project_master = self.project_root / "MEMORY.md"
+        self.user_master.write_text(recall.USER_MEMORY_TEMPLATE, encoding="utf-8")
+        self.project_master.write_text(recall.CURATED_MASTER_TEMPLATE, encoding="utf-8")
+        recall.ensure_section_files(self.user_root)
+        recall.ensure_section_files(self.project_root / "memory")
+
+        (self.user_root / "experiences.md").write_text(
+            "## Experiences\n\n<!-- comment -->\n\n"
+            "- **2026-03-27** [testing] {entities: promotion-test} Promotable experience entry.\n",
+            encoding="utf-8",
+        )
+
+    def test_promote_reads_user_sections_and_writes_project_section(self):
+        result = manage.promote(
+            self.user_master,
+            self.project_master,
+            "experiences",
+            0,
+            allow_project_promotion=True,
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["target"], str(self.project_root / "memory" / "experiences.md"))
+        self.assertNotIn(
+            "Promotable experience entry.",
+            self.project_master.read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            "Promotable experience entry.",
+            (self.project_root / "memory" / "experiences.md").read_text(encoding="utf-8"),
+        )
+
 
 class TestAutoMigrate(unittest.TestCase):
     """load_memory should auto-split a legacy single-file MEMORY.md."""
@@ -1318,6 +1406,140 @@ class TestAutoMigrate(unittest.TestCase):
         recall.load_memory(self.master, self.section_dir)
         bank2 = recall.load_memory(self.master, self.section_dir)
         self.assertEqual(len(bank2.experiences), 4)
+
+
+class TestSkillConfigPath(unittest.TestCase):
+    def test_user_skill_config_same_dir_as_memory(self):
+        p = recall.resolve_user_skill_config_path()
+        self.assertEqual(p.parent, recall.resolve_user_memory_path().parent)
+        self.assertEqual(p.name, "memory-skill.config.json")
+
+
+class TestSkillConfig(unittest.TestCase):
+    def test_defaults_validate(self):
+        cfg = manage.default_skill_config()
+        vr = manage.validate_skill_config_structure(cfg)
+        self.assertTrue(vr["valid"], vr["errors"])
+
+    def test_merge_partial_actions_preserves_defaults(self):
+        root = Path(tempfile.mkdtemp())
+        p = root / "memory-skill.config.json"
+        p.write_text(
+            json.dumps({"actions": {"remember": "custom-direct-id"}}),
+            encoding="utf-8",
+        )
+        cfg = manage.load_skill_config(p)
+        self.assertEqual(cfg["actions"]["remember"], "custom-direct-id")
+        self.assertEqual(cfg["actions"]["reflect"], "strong")
+
+    def test_build_config_hints_direct_and_preset(self):
+        root = Path(tempfile.mkdtemp())
+        p = root / "memory-skill.config.json"
+        p.write_text(
+            json.dumps(
+                {
+                    "presets": {"p1": "flagship"},
+                    "actions": {
+                        "remember": "raw-mini-model",
+                        "reflect": "p1",
+                        "maintain": "p1",
+                        "promote": "p1",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        hints = manage.build_config_hints(p)
+        self.assertNotIn("load_error", hints)
+        self.assertTrue(hints["validation"]["valid"])
+        self.assertEqual(hints["subagent_models"]["remember"]["via"], "direct")
+        self.assertEqual(hints["subagent_models"]["remember"]["model_id"], "raw-mini-model")
+        self.assertEqual(hints["subagent_models"]["reflect"]["model_id"], "flagship")
+        self.assertEqual(
+            hints["optional_escalation"]["remember_when_auto_reflect"]["model_id"],
+            "reasoning",
+        )
+
+    def test_config_hints_empty_when_validation_fails(self):
+        root = Path(tempfile.mkdtemp())
+        p = root / "memory-skill.config.json"
+        p.write_text(json.dumps({"version": 2}), encoding="utf-8")
+        hints = manage.build_config_hints(p)
+        self.assertFalse(hints["validation"]["valid"])
+        self.assertEqual(hints["subagent_models"], {})
+        self.assertEqual(hints["optional_escalation"], {})
+
+    def test_validate_config_rejects_bad_version(self):
+        root = Path(tempfile.mkdtemp())
+        p = root / "memory-skill.config.json"
+        p.write_text(json.dumps({"version": 2}), encoding="utf-8")
+        out = manage.run_validate_config(p)
+        self.assertFalse(out["valid"])
+        self.assertTrue(any("version" in e for e in out["errors"]))
+
+    def test_validate_config_rejects_invalid_json(self):
+        root = Path(tempfile.mkdtemp())
+        p = root / "memory-skill.config.json"
+        p.write_text("{not json", encoding="utf-8")
+        out = manage.run_validate_config(p)
+        self.assertFalse(out["valid"])
+        self.assertTrue(any("JSON" in e for e in out["errors"]))
+
+    def test_validate_config_unknown_action_key(self):
+        root = Path(tempfile.mkdtemp())
+        p = root / "memory-skill.config.json"
+        p.write_text(
+            json.dumps({"actions": {"remember": "fast", "bogus": "x"}}),
+            encoding="utf-8",
+        )
+        out = manage.run_validate_config(p)
+        self.assertFalse(out["valid"])
+        self.assertTrue(any("bogus" in e for e in out["errors"]))
+
+    def test_validate_structure_requires_all_actions(self):
+        cfg = dict(manage.default_skill_config())
+        del cfg["actions"]["promote"]
+        vr = manage.validate_skill_config_structure(cfg)
+        self.assertFalse(vr["valid"])
+        self.assertTrue(any("missing required keys" in e for e in vr["errors"]))
+
+    def test_validate_config_cli_nonzero_on_invalid_json(self):
+        script = Path(manage.__file__).resolve()
+        root = Path(tempfile.mkdtemp())
+        bad = root / "x.json"
+        bad.write_text("{not", encoding="utf-8")
+        r = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--skill-config",
+                str(bad),
+                "validate-config",
+            ],
+            cwd=str(script.parent),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(r.returncode, 1)
+
+    def test_init_user_seeds_skill_config_in_fresh_home(self):
+        script = Path(manage.__file__).resolve()
+        with tempfile.TemporaryDirectory() as td:
+            env = os.environ.copy()
+            env["HOME"] = td
+            r = subprocess.run(
+                [sys.executable, str(script), "init-user"],
+                cwd=str(script.parent),
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+            cfg_path = Path(td) / ".agents" / "memory" / "memory-skill.config.json"
+            self.assertTrue(cfg_path.is_file())
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            self.assertEqual(data["version"], 1)
+            self.assertEqual(set(data["actions"]), manage.SUBAGENT_ACTIONS)
 
 
 if __name__ == "__main__":

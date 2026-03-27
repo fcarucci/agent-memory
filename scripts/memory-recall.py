@@ -162,6 +162,11 @@ def resolve_user_memory_path() -> Path:
     return DEFAULT_USER_MEMORY_PATH
 
 
+def resolve_user_skill_config_path() -> Path:
+    """Return ``memory-skill.config.json`` next to user ``MEMORY.md``."""
+    return resolve_user_memory_path().parent / "memory-skill.config.json"
+
+
 def resolve_section_dir(scope: str) -> Path:
     """Return the directory that holds per-section files for *scope*.
 

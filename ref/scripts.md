@@ -37,6 +37,11 @@ python3 skills/memory/scripts/memory-recall.py --stats --scope user
 ```bash
 python3 skills/memory/scripts/memory-manage.py --help
 
+# Subagent model config (see ref/config.md):
+python3 skills/memory/scripts/memory-manage.py validate-config
+python3 skills/memory/scripts/memory-manage.py config-hints
+python3 skills/memory/scripts/memory-manage.py --skill-config /path/to/memory-skill.config.json validate-config
+
 # Initialize user memory:
 python3 skills/memory/scripts/memory-manage.py init-user
 

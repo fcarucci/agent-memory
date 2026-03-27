@@ -19,6 +19,8 @@ Usage:
     python skills/memory/scripts/memory-manage.py suggest-summaries
     python skills/memory/scripts/memory-manage.py init-user
     python skills/memory/scripts/memory-manage.py promote --section experiences --index 0 --allow-project-promotion
+    python skills/memory/scripts/memory-manage.py validate-config
+    python skills/memory/scripts/memory-manage.py config-hints
 """
 
 import argparse
@@ -31,7 +33,7 @@ import tempfile
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from importlib import import_module
@@ -48,6 +50,271 @@ def resolve_section_path(scope: str, section: str) -> Path:
     """Return the section file path, creating it if needed."""
     section_dir = recall_mod.resolve_section_dir(scope)
     return recall_mod.ensure_section_file(section_dir, section)
+
+
+# --- Subagent model config (memory-skill.config.json, user memory dir) ---
+
+SKILL_CONFIG_ENV = "MEMORY_SKILL_CONFIG_PATH"
+SUBAGENT_ACTIONS = frozenset({"remember", "reflect", "maintain", "promote"})
+SKILL_CONFIG_TOP_LEVEL = frozenset({
+    "version", "default_preset", "presets", "actions", "overrides",
+})
+OPTIONAL_OVERRIDE_KEYS = frozenset({"remember_when_auto_reflect"})
+
+
+def default_skill_config() -> dict[str, Any]:
+    """Built-in defaults when no config file exists (see ``ref/config.md``)."""
+    return {
+        "version": 1,
+        "default_preset": "balanced",
+        "presets": {
+            "strong": "reasoning",
+            "balanced": "default",
+            "fast": "fast",
+        },
+        "actions": {
+            "remember": "fast",
+            "reflect": "strong",
+            "maintain": "balanced",
+            "promote": "balanced",
+        },
+        "overrides": {
+            "remember_when_auto_reflect": "strong",
+        },
+    }
+
+
+def merge_skill_config(base: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    """Deep-merge user file over *base* for known sections."""
+    out: dict[str, Any] = json.loads(json.dumps(base))
+    if "version" in user:
+        out["version"] = user["version"]
+    if "default_preset" in user:
+        out["default_preset"] = user["default_preset"]
+    if isinstance(user.get("presets"), dict):
+        presets_out = dict(out["presets"])
+        for k, v in user["presets"].items():
+            if isinstance(k, str) and isinstance(v, str):
+                presets_out[k] = v
+        out["presets"] = presets_out
+    if isinstance(user.get("actions"), dict):
+        actions_out = dict(out["actions"])
+        for k, v in user["actions"].items():
+            if isinstance(k, str) and isinstance(v, str):
+                actions_out[k] = v
+        out["actions"] = actions_out
+    if isinstance(user.get("overrides"), dict):
+        ov = dict(out["overrides"])
+        for k, v in user["overrides"].items():
+            if isinstance(k, str) and isinstance(v, str):
+                ov[k] = v
+        out["overrides"] = ov
+    return out
+
+
+def resolve_skill_config_path(explicit: Optional[Path] = None) -> Path:
+    if explicit is not None:
+        return explicit
+    env = os.environ.get(SKILL_CONFIG_ENV, "").strip()
+    if env:
+        return Path(env).expanduser().resolve()
+    return recall_mod.resolve_user_skill_config_path()
+
+
+def load_skill_config(config_path: Optional[Path] = None) -> dict[str, Any]:
+    """Load merged skill config. Missing file → defaults only."""
+    path = resolve_skill_config_path(config_path)
+    base = default_skill_config()
+    if not path.exists():
+        return base
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("memory-skill config root must be a JSON object")
+    return merge_skill_config(base, raw)
+
+
+def resolve_action_model(presets: dict[str, str], raw_value: str) -> dict[str, Any]:
+    """Map a preset name or direct model id to a concrete ``model_id``."""
+    if raw_value in presets:
+        return {
+            "config_value": raw_value,
+            "via": "preset",
+            "model_id": presets[raw_value],
+        }
+    return {
+        "config_value": raw_value,
+        "via": "direct",
+        "model_id": raw_value,
+    }
+
+
+def validate_skill_config_structure(data: dict[str, Any]) -> dict[str, Any]:
+    """Validate merged config. Returns ``valid``, ``errors``, ``warnings``."""
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    for key in data:
+        if key not in SKILL_CONFIG_TOP_LEVEL:
+            warnings.append(f"unknown top-level key ignored by validator: {key!r}")
+
+    ver = data.get("version", 1)
+    if ver != 1:
+        errors.append(f"unsupported version: {ver!r} (expected 1)")
+
+    presets = data.get("presets")
+    if not isinstance(presets, dict) or not presets:
+        errors.append("'presets' must be a non-empty object")
+    else:
+        for pk, pv in presets.items():
+            if not isinstance(pk, str) or not isinstance(pv, str):
+                errors.append("all preset keys and values must be strings")
+                break
+            if not pv.strip():
+                errors.append(f"preset {pk!r} has empty model id")
+
+    default_preset = data.get("default_preset", "")
+    if isinstance(presets, dict) and default_preset not in presets:
+        errors.append(
+            f"default_preset {default_preset!r} is not a key in presets"
+        )
+
+    actions = data.get("actions")
+    if not isinstance(actions, dict) or not actions:
+        errors.append("'actions' must be a non-empty object")
+    else:
+        missing_actions = SUBAGENT_ACTIONS - set(actions.keys())
+        if missing_actions:
+            errors.append(
+                "actions missing required keys: "
+                + ", ".join(sorted(missing_actions))
+            )
+        for ak in actions:
+            if ak not in SUBAGENT_ACTIONS:
+                errors.append(f"unknown action key: {ak!r}")
+        for ak, av in actions.items():
+            if ak not in SUBAGENT_ACTIONS:
+                continue
+            if not isinstance(av, str) or not av.strip():
+                errors.append(f"actions.{ak} must be a non-empty string")
+            elif isinstance(presets, dict) and av not in presets:
+                # Direct model id — allowed
+                pass
+
+    overrides = data.get("overrides", {})
+    if overrides is None:
+        overrides = {}
+    if not isinstance(overrides, dict):
+        errors.append("'overrides' must be an object when present")
+    else:
+        for ok in overrides:
+            if ok not in OPTIONAL_OVERRIDE_KEYS:
+                warnings.append(f"unknown overrides key (forward-compat): {ok!r}")
+
+    return {
+        "valid": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
+def build_config_hints(config_path: Optional[Path] = None) -> dict[str, Any]:
+    """Structured output for orchestrators spawning memory subagents."""
+    path = resolve_skill_config_path(config_path)
+    exists = path.exists()
+    try:
+        cfg = load_skill_config(config_path)
+    except (json.JSONDecodeError, ValueError, OSError) as e:
+        return {
+            "config_path": str(path),
+            "config_exists": exists,
+            "load_error": str(e),
+            "subagent_models": {},
+            "optional_escalation": {},
+        }
+
+    presets: dict[str, str] = dict(cfg.get("presets") or {})
+    vr = validate_skill_config_structure(cfg)
+    if not vr["valid"]:
+        return {
+            "config_path": str(path),
+            "config_exists": exists,
+            "version": cfg.get("version", 1),
+            "validation": vr,
+            "subagent_models": {},
+            "optional_escalation": {},
+            "note": "Resolve validation errors before using subagent_models.",
+        }
+
+    subagent_models: dict[str, Any] = {}
+    for action in sorted(SUBAGENT_ACTIONS):
+        raw = (cfg.get("actions") or {}).get(action)
+        if not raw:
+            dp = cfg.get("default_preset", "")
+            raw = dp if dp in presets else ""
+        if not raw:
+            subagent_models[action] = {
+                "error": "missing action mapping and default_preset",
+            }
+            continue
+        subagent_models[action] = resolve_action_model(presets, raw)
+
+    optional_escalation: dict[str, Any] = {}
+    overrides = cfg.get("overrides") or {}
+    if isinstance(overrides, dict):
+        raw_esc = overrides.get("remember_when_auto_reflect")
+        if isinstance(raw_esc, str) and raw_esc.strip():
+            optional_escalation["remember_when_auto_reflect"] = resolve_action_model(
+                presets, raw_esc
+            )
+
+    return {
+        "config_path": str(path),
+        "config_exists": exists,
+        "version": cfg.get("version", 1),
+        "validation": vr,
+        "subagent_models": subagent_models,
+        "optional_escalation": optional_escalation,
+        "note": (
+            "Use subagent_models when spawning memory subagents. "
+            "optional_escalation applies if the host splits retain vs auto-reflect."
+        ),
+    }
+
+
+def run_validate_config(config_path: Optional[Path] = None) -> dict[str, Any]:
+    path = resolve_skill_config_path(config_path)
+    exists = path.exists()
+    try:
+        cfg = load_skill_config(config_path)
+    except json.JSONDecodeError as e:
+        return {
+            "valid": False,
+            "config_path": str(path),
+            "config_exists": exists,
+            "errors": [f"invalid JSON: {e}"],
+            "warnings": [],
+        }
+    except (ValueError, OSError) as e:
+        return {
+            "valid": False,
+            "config_path": str(path),
+            "config_exists": exists,
+            "errors": [str(e)],
+            "warnings": [],
+        }
+    vr = validate_skill_config_structure(cfg)
+    out: dict[str, Any] = {
+        "valid": vr["valid"],
+        "config_path": str(path),
+        "config_exists": exists,
+        "errors": vr["errors"],
+        "warnings": vr["warnings"],
+    }
+    if vr["valid"]:
+        out["presets"] = list((cfg.get("presets") or {}).keys())
+        out["actions"] = list((cfg.get("actions") or {}).keys())
+    return out
+
 
 DUPLICATE_THRESHOLD = 0.65
 
@@ -312,7 +579,7 @@ def validate(path: Path) -> dict:
 
     is_curated = "per-section files" in content
     if not is_curated:
-        for heading in ("## Experiences", "## World Knowledge", "## Beliefs", "## Entity Summaries"):
+        for heading in ("## Experiences", "## World Knowledge", "## Beliefs", "## Reflections", "## Entity Summaries"):
             if heading not in content:
                 errors.append(f"Missing section '{heading}'")
 
@@ -650,16 +917,26 @@ def suggest_summaries(path: Path) -> dict:
 
 
 def init_user() -> dict:
-    """Create the user memory directory, curated master, and section files."""
+    """Create the user memory directory, curated master, section files, and optional skill config."""
     path = recall_mod.ensure_user_memory()
     section_dir = recall_mod.resolve_section_dir("user")
     created = recall_mod.ensure_section_files(section_dir)
+    cfg_path = recall_mod.resolve_user_skill_config_path()
+    skill_config_seeded = False
+    if not cfg_path.exists():
+        cfg_path.write_text(
+            json.dumps(default_skill_config(), indent=2) + "\n",
+            encoding="utf-8",
+        )
+        skill_config_seeded = True
     return {
         "success": True,
         "path": str(path),
         "section_dir": str(section_dir),
         "section_files": [str(p) for p in created],
         "created": path.exists(),
+        "skill_config_path": str(cfg_path),
+        "skill_config_seeded": skill_config_seeded,
     }
 
 
@@ -804,6 +1081,31 @@ def _ensure_section_file(scope_label: str, section: str) -> Path:
     return recall_mod.ensure_section_file(section_dir, section)
 
 
+def _section_dir_for_path(master_path: Path, scope_label: str) -> Path:
+    """Per-section directory implied by curated *master_path*."""
+    if scope_label == "user":
+        return master_path.parent
+    return master_path.parent / "memory"
+
+
+def _resolve_section_backed_path(
+    master_path: Path,
+    scope_label: str,
+    section: str,
+    *,
+    create_missing: bool = True,
+) -> Path:
+    """Write target for *section*: ``<section>.md`` when section layout exists, else *master_path*."""
+    master_path = _ensure_memory_file(master_path, scope_label)
+    section_dir = _section_dir_for_path(master_path, scope_label)
+    if recall_mod.has_section_files(section_dir):
+        candidate = recall_mod.section_file_path(section_dir, section)
+        if create_missing and not candidate.exists():
+            return recall_mod.ensure_section_file(section_dir, section)
+        return candidate
+    return master_path
+
+
 def _insert_entry(content: str, section: str, raw_line: str) -> tuple[bool, Optional[str]]:
     """Insert a raw line at the top of a target section."""
     section_headers = {
@@ -875,16 +1177,12 @@ def append_entry(
     (legacy single-file mode).  When section files exist the write
     targets the appropriate ``<section>.md`` file instead.
     """
-    section_dir = recall_mod.resolve_section_dir(scope_label)
-    path_is_explicit = path.exists()
-    if path_is_explicit:
-        local_section_dir = path.parent / "memory" if path.name == "MEMORY.md" else path.parent
-        if recall_mod.has_section_files(local_section_dir):
-            path = recall_mod.ensure_section_file(local_section_dir, section)
-    elif recall_mod.has_section_files(section_dir):
-        path = recall_mod.ensure_section_file(section_dir, section)
-    else:
-        path = _ensure_memory_file(path, scope_label)
+    path = _resolve_section_backed_path(
+        path,
+        scope_label,
+        section,
+        create_missing=True,
+    )
 
     screening = screen_text(text)
     if not screening["safe"]:
@@ -905,11 +1203,24 @@ def append_entry(
     if context and normalized_context is None:
         return {"success": False, "error": f"Unknown context tag '{context}'"}
 
+    extra_paths = None
+    if cross_scope_path and cross_scope_path.exists():
+        other_scope = "project" if scope_label == "user" else "user"
+        extra_paths = [(
+            "other-scope",
+            _resolve_section_backed_path(
+                cross_scope_path,
+                other_scope,
+                section,
+                create_missing=False,
+            ),
+        )]
+
     duplicate = check_duplicate(
         path,
         section,
         screening["sanitized_text"],
-        extra_paths=[("other-scope", cross_scope_path)] if cross_scope_path and cross_scope_path.exists() else None,
+        extra_paths=extra_paths,
     )
     if duplicate["is_duplicate"]:
         return {
@@ -1014,9 +1325,14 @@ def promote(
             "error": "Promotion requires explicit --allow-project-promotion approval",
         }
 
-    user_bank = recall_mod.parse_memory_file(user_path)
-    _ensure_memory_file(project_path, "project")
-    project_content = project_path.read_text(encoding="utf-8")
+    user_bank = recall_mod.load_memory(user_path, _section_dir_for_path(user_path, "user"))
+    project_target = _resolve_section_backed_path(
+        project_path,
+        "project",
+        section,
+        create_missing=True,
+    )
+    project_content = project_target.read_text(encoding="utf-8")
     original_hash = content_hash(project_content)
 
     raw_line: Optional[str] = None
@@ -1029,21 +1345,21 @@ def promote(
         raw_line = entry.raw
         entry_context = entry.context
         entry_text = entry.text
-        dup = check_duplicate(project_path, section, entry.text)
+        dup = check_duplicate(project_target, section, entry.text)
     elif section == "world_knowledge":
         if index >= len(user_bank.world_knowledge):
             return {"success": False, "error": f"Index {index} out of range in user world_knowledge"}
         entry = user_bank.world_knowledge[index]
         raw_line = entry.raw
         entry_text = entry.text
-        dup = check_duplicate(project_path, section, entry.text)
+        dup = check_duplicate(project_target, section, entry.text)
     elif section == "beliefs":
         if index >= len(user_bank.beliefs):
             return {"success": False, "error": f"Index {index} out of range in user beliefs"}
         entry = user_bank.beliefs[index]
         raw_line = entry.raw
         entry_text = entry.text
-        dup = check_duplicate(project_path, section, entry.text)
+        dup = check_duplicate(project_target, section, entry.text)
     else:
         return {"success": False, "error": f"Cannot promote from section '{section}'"}
 
@@ -1072,7 +1388,7 @@ def promote(
     if not inserted or new_content is None:
         return {"success": False, "error": f"Could not find section '{section}' in project memory"}
 
-    write_result = write_text_if_unchanged(project_path, new_content, original_hash)
+    write_result = write_text_if_unchanged(project_target, new_content, original_hash)
     if not write_result["success"]:
         return write_result
 
@@ -1081,7 +1397,7 @@ def promote(
         "section": section,
         "index": index,
         "promoted_text": raw_line,
-        "target": str(project_path),
+        "target": str(project_target),
     }
 
 
@@ -1227,6 +1543,15 @@ def _resolve_section_file_for_read(scope: str, section: str,
 
 def main():
     parser = argparse.ArgumentParser(description="Memory management operations")
+    parser.add_argument(
+        "--skill-config",
+        type=Path,
+        default=None,
+        help=(
+            "Path to memory-skill.config.json "
+            "(default: ~/.agents/memory/ or MEMORY_SKILL_CONFIG_PATH)"
+        ),
+    )
     parser.add_argument("--file", type=Path, default=None,
                         help="Explicit path to a memory file (overrides --scope)")
     parser.add_argument("--scope", choices=["user", "project"], default=None,
@@ -1301,6 +1626,15 @@ def main():
     curate_parser.add_argument("--max-world", type=int, default=10)
     curate_parser.add_argument("--max-beliefs", type=int, default=10)
     curate_parser.add_argument("--max-summaries", type=int, default=20)
+
+    sub.add_parser(
+        "validate-config",
+        help="Validate memory-skill.config.json (user memory dir; see ref/config.md)",
+    )
+    sub.add_parser(
+        "config-hints",
+        help="Print resolved model ids for memory subagent actions",
+    )
 
     args = parser.parse_args()
 
@@ -1450,11 +1784,17 @@ def main():
                         max_world=args.max_world,
                         max_beliefs=args.max_beliefs,
                         max_summaries=args.max_summaries)
+    elif args.command == "validate-config":
+        result = run_validate_config(args.skill_config)
+    elif args.command == "config-hints":
+        result = build_config_hints(args.skill_config)
     else:
         parser.error(f"Unknown command: {args.command}")
         return
 
     print(json.dumps(result, indent=2))
+    if args.command == "validate-config" and not result.get("valid", True):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

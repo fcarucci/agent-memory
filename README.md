@@ -49,12 +49,6 @@ It is **not** a faithful reproduction of every detail in the paper; it is a **pr
 ~/.agents/memory/entity_summaries.md
 ```
 
-Writes go to the **per-section files**. The curated master is regenerated automatically at the end of every **reflect** and **retain** (auto-reflect) operation, or on demand with `memory-manage.py curate`.
-
-## Install
-
-Requirements: **Python 3** on `PATH` (`python3`). Scripts are plain stdlib.
-
 ### Path discovery
 
 The skill **does not assume** a fixed install path. Scripts resolve the **project** `MEMORY.md` by:
@@ -64,6 +58,12 @@ The skill **does not assume** a fixed install path. Scripts resolve the **projec
 3. Falling back to **`./MEMORY.md`** (natural default when cwd is the project root).
 
 Section files are derived from the master path: **`<master-parent>/memory/`** for project scope, **`<master-parent>/`** for user scope.
+
+Writes go to the **per-section files**. The curated master is regenerated automatically at the end of every **reflect** and **retain** (auto-reflect) operation, or on demand with `memory-manage.py curate`.
+
+## Install
+
+Requirements: **Python 3** on `PATH` (`python3`). Scripts are plain stdlib.
 
 ### Cursor
 
@@ -104,7 +104,7 @@ Copy or symlink this repo so you have `.claude/skills/memory/SKILL.md`, etc. Use
 python3 skills/memory/scripts/memory-manage.py init-user
 ```
 
-This creates `~/.agents/memory/MEMORY.md` (curated master) and all five section files.
+This creates `~/.agents/memory/MEMORY.md` (curated master), all five section files, and—if absent—`memory-skill.config.json` with default subagent model presets (edit to match your host).
 
 ### Migrate from single-file layout
 
@@ -176,6 +176,16 @@ Adjust paths if your install uses `.cursor/skills/memory/` or another prefix.
 | User section files | `~/.agents/memory/*.md` (alongside master). |
 
 Use **`--file <path>`** on `memory-recall.py` or `memory-manage.py` to override scope resolution for a single invocation.
+
+### Subagent model presets (`memory-skill.config.json`)
+
+Optional JSON next to user `MEMORY.md`: **`~/.agents/memory/memory-skill.config.json`**. Maps memory **subagent** actions (`remember`, `reflect`, `maintain`, `promote`) to named presets or direct model ids so orchestrators can spawn with a **stronger** model for reflect and a **cheaper** one for routine retains when appropriate.
+
+- **Spec:** [`ref/config.md`](ref/config.md)
+- **Example:** [`ref/memory-skill.config.example.json`](ref/memory-skill.config.example.json)
+- **Validate:** `python3 skills/memory/scripts/memory-manage.py validate-config`
+- **Resolved ids for spawns:** `python3 skills/memory/scripts/memory-manage.py config-hints`
+- **Override path / tests:** env `MEMORY_SKILL_CONFIG_PATH` or `memory-manage.py --skill-config <path> …`
 
 ### Scopes (CLI)
 
