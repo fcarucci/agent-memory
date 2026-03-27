@@ -28,42 +28,6 @@ This implementation:
 
 It is **not** a faithful reproduction of every detail in the paper; it is a **practical, text-first** adaptation for coding agents.
 
-## File layout
-
-### Project scope
-
-```
-<repo>/MEMORY.md                          # curated master (world knowledge + beliefs + entity summaries)
-<repo>/memory/experiences.md              # all experiences
-<repo>/memory/world_knowledge.md          # verified facts
-<repo>/memory/beliefs.md                  # subjective judgments
-<repo>/memory/reflections.md              # higher-level patterns
-<repo>/memory/entity_summaries.md         # synthesized entity profiles
-```
-
-### User scope
-
-```
-~/.agents/memory/MEMORY.md                # curated master
-~/.agents/memory/experiences.md           # all experiences
-~/.agents/memory/world_knowledge.md
-~/.agents/memory/beliefs.md
-~/.agents/memory/reflections.md
-~/.agents/memory/entity_summaries.md
-```
-
-### Path discovery
-
-The skill **does not assume** a fixed install path. Path resolution for the **project** `MEMORY.md` walks:
-
-1. Walking **upward from cwd** for the first `MEMORY.md`.
-2. Walking **upward from the helper’s directory** in `scripts/`.
-3. Falling back to **`./MEMORY.md`** (natural default when cwd is the project root).
-
-Section files are derived from the master path: **`<master-parent>/memory/`** for project scope, **`<master-parent>/`** for user scope.
-
-Writes go to the **per-section files**. The curated master is regenerated automatically at the end of every **reflect** and **retain** (auto-reflect) operation, or on demand via the **curation** step in **`SKILL.md`** / **`ref/retain.md`**.
-
 ## Install
 
 Requirements: **Python 3** available to the host that runs the skill’s stdlib helpers.
@@ -114,6 +78,42 @@ Requirements: **Python 3** available to the host that runs the skill’s stdlib 
 3. Use memory **only through the skill:** point **agent** rules at **`SKILL.md`** (and the [recommended `AGENTS.md` snippet](#recommended-agent-wiring-agentsmd) if you use that pattern). The **agent** follows the skill when **`SKILL.md`** says to—same model as Cursor and Codex. Do not invoke the skill’s helpers yourself for routine memory work.
 
 4. **Integrators only:** set **`MEMORY_SKILL_HOST=claude`** when wiring config resolution for Claude Code so `hosts.claude` applies (see [Subagent model presets](#subagent-model-presets-memory-skillconfigjson)).
+
+## File layout
+
+### Project scope
+
+```
+<repo>/MEMORY.md                          # curated master (world knowledge + beliefs + entity summaries)
+<repo>/memory/experiences.md              # all experiences
+<repo>/memory/world_knowledge.md          # verified facts
+<repo>/memory/beliefs.md                  # subjective judgments
+<repo>/memory/reflections.md              # higher-level patterns
+<repo>/memory/entity_summaries.md         # synthesized entity profiles
+```
+
+### User scope
+
+```
+~/.agents/memory/MEMORY.md                # curated master
+~/.agents/memory/experiences.md           # all experiences
+~/.agents/memory/world_knowledge.md
+~/.agents/memory/beliefs.md
+~/.agents/memory/reflections.md
+~/.agents/memory/entity_summaries.md
+```
+
+### Path discovery
+
+The skill **does not assume** a fixed install path. Path resolution for the **project** `MEMORY.md` walks:
+
+1. Walking **upward from cwd** for the first `MEMORY.md`.
+2. Walking **upward from the helper’s directory** in `scripts/`.
+3. Falling back to **`./MEMORY.md`** (natural default when cwd is the project root).
+
+Section files are derived from the master path: **`<master-parent>/memory/`** for project scope, **`<master-parent>/`** for user scope.
+
+Writes go to the **per-section files**. The curated master is regenerated automatically at the end of every **reflect** and **retain** (auto-reflect) operation, or on demand via the **curation** step in **`SKILL.md`** / **`ref/retain.md`**.
 
 ## Using memory
 

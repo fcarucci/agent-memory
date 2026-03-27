@@ -57,6 +57,21 @@ Rules:
 - Keep entries newest-first.
 - No duplicates or near-duplicates.
 
+### Structured episodic traces
+
+For debugging- and incident-style **experiences**, shape the narrative as a
+short **trace**: what was attempted → what happened (symptoms or errors
+**in the abstract**) → what fixed it or what was learned. This aids
+auditability and later reflection without raw logs. Never paste secrets or
+full stack traces—follow the sensitive-data rules in `ref/retain.md`.
+Optional **causal tags** (below) fit naturally when cause-effect is clear.
+
+Example:
+
+```text
+- **2026-03-27** [debug] {entities: ci-pipeline, rust-toolchain} Ran `cargo test` on the default CI image; the job failed because the `wasm32-unknown-unknown` target was missing. Adding an explicit `rustup target add` step (and aligning with the repo toolchain file) fixed the pipeline.
+```
+
 ## Causal links
 
 Experiences and reflections can optionally annotate cause-effect

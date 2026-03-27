@@ -50,6 +50,16 @@ Four-network memory model inspired by
 [Hindsight](https://arxiv.org/abs/2512.12818), adapted for text-only
 markdown storage.
 
+### Cache, not source of truth
+
+`MEMORY.md` (and section files) are a **cache of useful execution and
+verified facts**, not an authoritative record of the repo, runtime, or
+tools. For high-stakes work, **re-check** code, configs, tests, and live
+behavior. Memory should improve future task success, not replace search,
+tests, or tooling. Prefer **no new entry** over accumulating low-signal
+volume. See `ref/retain.md` (outcome-linked transfer, temporal validity)
+and `ref/format.md` (structured episodic traces).
+
 ### Two-tier scoping
 
 | Scope | Location | Purpose |

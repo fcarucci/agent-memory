@@ -88,6 +88,26 @@ User memory under `~/.agents/memory/` is **created automatically** the first tim
 | "X is better than Y", "I think…", "Prefer…" | Belief |
 | Summarizes an entity from 3+ memories | Entity Summary |
 
+## Outcome-linked transfer
+
+Prefer capturing or upgrading **durable** workflow and factual memories
+when there is an **observable signal**: e.g. a test or build
+passed/failed, explicit user correction, CI output, or a reproduced fix.
+Speculative or one-off hunches belong in **beliefs** at low confidence—or
+not at all—not in **world knowledge**. The idea is **transfer with a
+trigger**: memory should track **outcomes**, not only the intent to
+remember something.
+
+## Temporal validity
+
+Experiences are **dated** because tooling, APIs, and layout drift. When a
+lesson depends on a **version, branch, release, or time window**, say so
+in the narrative so readers and reflect passes treat it as **scoped**,
+not eternal. **World knowledge** that can go stale (dependency majors, CLI
+flags) stays tied to **verification** and **sources**; when new work
+contradicts an old fact, update or supersede through normal retain and
+promote paths—the file is not frozen truth.
+
 ## Promotion from experience to world knowledge
 
 An experience can be promoted to world knowledge when:
@@ -97,6 +117,10 @@ An experience can be promoted to world knowledge when:
 3. **Verification**: confirmed against the current repo state.
 4. **Relevance**: non-obvious, actionable, and likely durable.
 5. **Generality**: wording removes one-off context.
+6. **Outcome linkage**: supporting experiences should, where possible,
+   reflect **clear outcomes** (fixes, checks, reproductions), not only
+   preference or narrative—aligned with cross-example consistency before
+   elevating a fact.
 
 When promoting, set the initial confidence based on the strength of
 evidence and record the source count.
