@@ -160,8 +160,10 @@ without requiring the caller to explicitly schedule reflection.
 
 After completing the retain write, run **prune-beliefs** (e.g. threshold `0.3`) and **suggest-summaries**. Inspect the belief `updated` dates from the file you just wrote.
 If any trigger condition is met, run the full reflect workflow
-(see `ref/reflect.md`) **in the same subagent invocation** — do not
-return and ask the caller to spawn a separate reflect.
+(see `ref/reflect.md`) **in the same remember subagent invocation** — do not
+return and ask the host to run reflect, and **the host must never** run
+that workflow itself. This keeps **all** reflect execution inside a
+subagent (`SKILL.md` invariant).
 
 ### Post-reflect curation
 

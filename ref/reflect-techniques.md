@@ -1,8 +1,10 @@
 # Reflect Techniques
 
-> **When to load:** Read this file during any full reflect pass (explicit
-> or auto-triggered). Not needed for the mini-reflect step inside retain
-> (step 10 in `ref/retain.md`) — that only does basic confidence deltas.
+> **When to load:** Read this file during any full reflect pass **inside a
+> memory subagent** (explicit `action: reflect` or auto-reflect inside
+> `action: remember`). The host/orchestrator must not run this file. Not
+> needed for the mini-reflect step inside retain (step 10 in
+> `ref/retain.md`) — that only does basic confidence deltas.
 
 These three techniques run **in order** during a full reflect, after
 the basic confidence updates in `ref/reflect.md` step 3 and before

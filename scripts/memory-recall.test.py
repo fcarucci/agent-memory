@@ -14,6 +14,9 @@ from importlib import import_module
 recall = import_module("memory-recall")
 manage = import_module("memory-manage")
 
+# Deterministic suite: host inference off unless a test clears this.
+os.environ["MEMORY_SKILL_DISABLE_HOST_INFERENCE"] = "1"
+
 
 SAMPLE_MEMORY = """\
 # Agent Memory
@@ -1848,6 +1851,57 @@ class TestSkillConfig(unittest.TestCase):
         cfg = manage.load_skill_config(p)
         vr = manage.validate_skill_config_structure(cfg)
         self.assertTrue(any("vim" in w for w in vr["warnings"]))
+
+
+class TestHostInference(unittest.TestCase):
+    """Host auto-detection (production); disabled for rest of suite via env."""
+
+    def setUp(self):
+        self._env_snapshot = dict(os.environ)
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self._env_snapshot)
+        os.environ["MEMORY_SKILL_DISABLE_HOST_INFERENCE"] = "1"
+
+    def test_infer_claude_from_claudecode(self):
+        os.environ.pop("MEMORY_SKILL_DISABLE_HOST_INFERENCE", None)
+        os.environ["CLAUDECODE"] = "1"
+        host, src = manage.resolve_memory_host_meta(None)
+        self.assertEqual(host, "claude")
+        self.assertEqual(src, "inferred:CLAUDECODE")
+
+    def test_infer_cursor_from_trace_id(self):
+        os.environ.pop("MEMORY_SKILL_DISABLE_HOST_INFERENCE", None)
+        os.environ["CURSOR_TRACE_ID"] = "abc"
+        host, src = manage.resolve_memory_host_meta(None)
+        self.assertEqual(host, "cursor")
+        self.assertEqual(src, "inferred:CURSOR_TRACE_ID")
+
+    def test_memory_skill_host_overrides_infer(self):
+        os.environ.pop("MEMORY_SKILL_DISABLE_HOST_INFERENCE", None)
+        os.environ["CLAUDECODE"] = "1"
+        os.environ["MEMORY_SKILL_HOST"] = "codex"
+        host, src = manage.resolve_memory_host_meta(None)
+        self.assertEqual(host, "codex")
+        self.assertEqual(src, "MEMORY_SKILL_HOST")
+
+    def test_cli_host_overrides_env_and_infer(self):
+        os.environ.pop("MEMORY_SKILL_DISABLE_HOST_INFERENCE", None)
+        os.environ["CLAUDECODE"] = "1"
+        os.environ["MEMORY_SKILL_HOST"] = "codex"
+        host, src = manage.resolve_memory_host_meta("claude")
+        self.assertEqual(host, "claude")
+        self.assertEqual(src, "cli")
+
+    def test_config_hints_includes_host_resolution(self):
+        root = Path(tempfile.mkdtemp())
+        p = root / "memory-skill.config.json"
+        p.write_text(json.dumps(manage.default_skill_config()), encoding="utf-8")
+        h = manage.build_config_hints(
+            p, host="codex", host_resolution="cli"
+        )
+        self.assertEqual(h["host_resolution"], "cli")
 
 
 if __name__ == "__main__":

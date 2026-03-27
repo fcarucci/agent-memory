@@ -30,7 +30,18 @@ Merge order for a given tool:
 
 Omit a tool entirely to use global routing only for that product.
 
-**Selecting the tool at runtime:** set environment variable **`MEMORY_SKILL_HOST`** to `cursor`, `claude`, or `codex` before running **config-hints**, or pass **`--host`** on **config-hints** (CLI flag wins over env when both are set).
+**Selecting the tool at runtime (merge order):**
+
+1. **`config-hints --host cursor|claude|codex`** — highest precedence.
+2. **`MEMORY_SKILL_HOST`** — same three values; used when `--host` is omitted.
+3. **Automatic inference** — when neither is set, the helper picks a host from the process environment (best-effort):
+   - **`claude`** if **`CLAUDECODE`** is set (Claude Code sets this in shells it spawns; see [Claude Code env vars](https://code.claude.com/docs/en/env-vars)).
+   - **`cursor`** if **`CURSOR_TRACE_ID`** or **`CURSOR_AGENT`** is set, or **`TERM_PROGRAM=cursor`**.
+   - **`codex`** — not auto-detected yet (no stable documented inject var); set **`MEMORY_SKILL_HOST=codex`** or **`--host codex`** until OpenAI documents one.
+
+Set **`MEMORY_SKILL_DISABLE_HOST_INFERENCE=1`** to turn off step 3 (tests, CI, or when inference misfires).
+
+**`config-hints`** JSON includes **`host_resolution`**: `cli`, `MEMORY_SKILL_HOST`, `inferred:CLAUDECODE`, `inferred:CURSOR_TRACE_ID`, etc., or `none`.
 
 ### `actions` keys (subagent operations)
 
@@ -63,7 +74,7 @@ The **management helper** exposes JSON-only operations for this file:
 | Operation | Purpose |
 |-----------|---------|
 | **validate-config** | Check syntax and known keys (uses defaults if the file is missing). |
-| **config-hints** | Emit resolved model ids per subagent action. Use **`--host cursor|claude|codex`** or **`MEMORY_SKILL_HOST`** so **`hosts.<tool>`** merges apply. |
+| **config-hints** | Emit resolved model ids per subagent action. Host merge: **`--host`**, then **`MEMORY_SKILL_HOST`**, then auto-inference (unless disabled). |
 
 For nonstandard layouts or tests, the host may supply an alternate config path via the **`MEMORY_SKILL_CONFIG_PATH`** environment variable or the helper’s per-run skill-config override (see helper sources under `skills/memory/scripts/`).
 

@@ -74,6 +74,7 @@ def resolve_section_path(scope: str, section: str) -> Path:
 
 SKILL_CONFIG_ENV = "MEMORY_SKILL_CONFIG_PATH"
 MEMORY_SKILL_HOST_ENV = "MEMORY_SKILL_HOST"
+MEMORY_SKILL_DISABLE_HOST_INFERENCE_ENV = "MEMORY_SKILL_DISABLE_HOST_INFERENCE"
 KNOWN_MEMORY_HOSTS = frozenset({"cursor", "claude", "codex"})
 SUBAGENT_ACTIONS = frozenset({"remember", "reflect", "maintain", "promote"})
 SKILL_CONFIG_TOP_LEVEL = frozenset({
@@ -219,16 +220,61 @@ def effective_host_config(cfg: dict[str, Any], host: Optional[str]) -> dict[str,
     }
 
 
-def resolve_memory_host(explicit: Optional[str]) -> Optional[str]:
-    """Return ``cursor`` / ``claude`` / ``codex`` from CLI or ``MEMORY_SKILL_HOST``."""
+def infer_memory_skill_host() -> tuple[Optional[str], Optional[str]]:
+    """Best-effort host id from product-injected environment (no user setup).
+
+    Returns ``(host, signal)`` where *signal* names the first env var that
+    matched (for diagnostics).  ``(None, None)`` when unknown.
+
+    Set ``MEMORY_SKILL_DISABLE_HOST_INFERENCE=1`` to skip (tests, CI).
+    """
+    if os.environ.get(MEMORY_SKILL_DISABLE_HOST_INFERENCE_ENV, "").strip() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return None, None
+    # Claude Code: official — set in shells spawned by Claude Code.
+    if os.environ.get("CLAUDECODE", "").strip():
+        return "claude", "CLAUDECODE"
+    # Cursor agent / integrated terminal signals (best-effort; may evolve).
+    for key in ("CURSOR_TRACE_ID", "CURSOR_AGENT"):
+        if os.environ.get(key, "").strip():
+            return "cursor", key
+    term = (os.environ.get("TERM_PROGRAM") or "").strip().lower()
+    if term == "cursor":
+        return "cursor", "TERM_PROGRAM"
+    # OpenAI Codex: no single stable documented inject var yet; use
+    # MEMORY_SKILL_HOST or --host until one exists.
+    return None, None
+
+
+def resolve_memory_host_meta(explicit: Optional[str]) -> tuple[Optional[str], str]:
+    """Resolve active host for ``hosts.<tool>`` merge.
+
+    Precedence: non-empty ``--host`` CLI value → ``MEMORY_SKILL_HOST`` →
+    :func:`infer_memory_skill_host` → none (global config only).
+
+    Second return value is ``cli``, ``MEMORY_SKILL_HOST``, ``inferred:<signal>``,
+    or ``none``.
+    """
     if explicit is not None and str(explicit).strip():
         h = str(explicit).strip().lower()
         if h in KNOWN_MEMORY_HOSTS:
-            return h
+            return h, "cli"
     env = os.environ.get(MEMORY_SKILL_HOST_ENV, "").strip().lower()
     if env in KNOWN_MEMORY_HOSTS:
-        return env
-    return None
+        return env, MEMORY_SKILL_HOST_ENV
+    inferred, signal = infer_memory_skill_host()
+    if inferred and signal:
+        return inferred, f"inferred:{signal}"
+    return None, "none"
+
+
+def resolve_memory_host(explicit: Optional[str]) -> Optional[str]:
+    """Return ``cursor`` / ``claude`` / ``codex`` for ``hosts.*`` merge."""
+    host, _ = resolve_memory_host_meta(explicit)
+    return host
 
 
 def _validate_merged_routing(
@@ -348,8 +394,13 @@ def validate_skill_config_structure(data: dict[str, Any]) -> dict[str, Any]:
 def build_config_hints(
     config_path: Optional[Path] = None,
     host: Optional[str] = None,
+    *,
+    host_resolution: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Structured output for orchestrators spawning memory subagents."""
+    """Structured output for orchestrators spawning memory subagents.
+
+    *host_resolution* documents how *host* was chosen (e.g. ``inferred:CLAUDECODE``).
+    """
     path = resolve_skill_config_path(config_path)
     exists = path.exists()
     try:
@@ -360,6 +411,7 @@ def build_config_hints(
             "config_exists": exists,
             "load_error": str(e),
             "host": host,
+            "host_resolution": host_resolution,
             "hosts_defined": [],
             "subagent_models": {},
             "optional_escalation": {},
@@ -378,6 +430,7 @@ def build_config_hints(
             "version": cfg.get("version", 1),
             "validation": vr,
             "host": host,
+            "host_resolution": host_resolution,
             "hosts_defined": hosts_defined,
             "subagent_models": {},
             "optional_escalation": {},
@@ -415,14 +468,17 @@ def build_config_hints(
         "version": cfg.get("version", 1),
         "validation": vr,
         "host": host,
+        "host_resolution": host_resolution,
         "hosts_defined": hosts_defined,
         "subagent_models": subagent_models,
         "optional_escalation": optional_escalation,
         "note": (
             "Use subagent_models when spawning memory subagents. "
             "optional_escalation applies if the host splits retain vs auto-reflect. "
-            "Set host to cursor, claude, or codex (CLI --host or MEMORY_SKILL_HOST) "
-            "to use per-tool presets/actions in hosts.<name>."
+            "Host merge uses --host, then MEMORY_SKILL_HOST, then automatic "
+            "inference (CLAUDECODE, CURSOR_TRACE_ID, CURSOR_AGENT, TERM_PROGRAM=cursor). "
+            "Override with MEMORY_SKILL_HOST or --host when inference is wrong; "
+            "set MEMORY_SKILL_DISABLE_HOST_INFERENCE=1 to disable inference (tests)."
         ),
     }
 
@@ -2004,8 +2060,9 @@ def main():
         choices=sorted(KNOWN_MEMORY_HOSTS),
         default=None,
         help=(
-            "Tool: cursor, claude, or codex — use hosts.<name> merge "
-            f"(default: global only; env {MEMORY_SKILL_HOST_ENV} when flag omitted)"
+            "Tool: cursor, claude, or codex — merge hosts.<name> over globals. "
+            "If omitted: use MEMORY_SKILL_HOST, else auto-detect (see config.md), "
+            f"else global only. Set {MEMORY_SKILL_DISABLE_HOST_INFERENCE_ENV}=1 to skip detection."
         ),
     )
 
@@ -2170,8 +2227,8 @@ def main():
     elif args.command == "validate-config":
         result = run_validate_config(args.skill_config)
     elif args.command == "config-hints":
-        h = resolve_memory_host(args.host)
-        result = build_config_hints(args.skill_config, host=h)
+        h, src = resolve_memory_host_meta(args.host)
+        result = build_config_hints(args.skill_config, host=h, host_resolution=src)
     else:
         parser.error(f"Unknown command: {args.command}")
         return

@@ -1,5 +1,13 @@
 # Reflect Operation (`action: reflect`)
 
+> **Host / orchestrator:** You **must never** run the steps in this file
+> yourself. **All** reflect workflow execution happens **only** inside a
+> subagent: either **`action: reflect`** (dedicated spawn), or **auto-reflect
+> inside `action: remember`** when `ref/retain.md` triggers it. When the user
+> asks to reflect (including **"reflect on your memories"**), spawn
+> **`action: reflect`** immediately—see **`SKILL.md`** (Invariant + Critical
+> rule).
+
 > **Maintain** lives in **`ref/maintain.md`** (workflow + **maintenance-report**).
 
 ## Reflect (`action: reflect`)

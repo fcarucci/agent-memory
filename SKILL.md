@@ -4,7 +4,9 @@ description: >
   Persistent memory system for the agent. Two-tier storage: user
   (~/.agents/memory/MEMORY.md) and project (<repo>/MEMORY.md).
   Five memory networks: experiences, world knowledge, beliefs,
-  reflections, entity summaries.
+  reflections, entity summaries. All reflect workflow execution runs
+  inside a subagent (reflect-only or remember+auto-reflect)—never on the
+  host/orchestrator turn.
 ---
 
 # Memory System
@@ -19,15 +21,62 @@ request to an action, then follow only that action's instructions.
 | "Remember this", "Don't forget", "Note that", "Keep in mind" | **remember** | **YES — spawn subagent** | `ref/format.md` + `ref/retain.md` |
 | "What do you remember?", "Show me memories", "What are your last memories?" | **show** | No | `ref/recall.md` |
 | "What do you know about X?", "Any memories about Y?" | **recall** | No | `ref/recall.md` |
-| "Reflect on your memory", "Dream", "Time for a reflection", "Review your beliefs" | **reflect** | **YES — spawn subagent** | `ref/reflect.md` + `ref/reflect-techniques.md` + `ref/profile.md` |
+| "Reflect on your memory", "Reflect on your memories", "Reflect on what you remember", "Dream", "Time for a reflection", "Review your beliefs", "Memory reflection", "Do a memory reflect" | **reflect** | **YES — dedicated subagent ONLY (host never runs reflect)** | `ref/reflect.md` + `ref/reflect-techniques.md` + `ref/profile.md` |
 | "Maintain memory", "Clean up memory", "Prune stale memories", "Memory hygiene" | **maintain** | **YES — spawn subagent** | `ref/maintain.md` + `ref/reflect.md` (belief rules) |
 | "Forget about X", "Delete that memory", "Remove the belief about Y" | **forget** | No | `ref/forget.md` |
 | "Promote this to the project" | **promote** | **YES — spawn subagent** | `ref/promote.md` |
 
-**Critical rule:** If the user asks to **store** something (remember,
+### Invariant: reflection always runs inside a subagent
+
+The **host / orchestrator** (this conversation turn, main agent, or any
+caller that is **not** a spawned memory subagent) **must never** execute
+the workflow in `ref/reflect.md`—not even by invoking helpers directly
+from the host while skipping a spawn.
+
+**Only two valid execution contexts** for that workflow exist:
+
+1. **Dedicated reflect subagent** — payload `action: reflect` (user asked
+   to reflect, session-end reflect step, or any explicit reflect request).
+2. **Auto-reflect inside a remember subagent** — when `ref/retain.md`
+   triggers after `action: remember`; the **same** remember subagent runs
+   the reflect steps; the host still **must not** run them.
+
+There is **no third context**. If reflection happened, a subagent ran it.
+
+**Critical rule (remember):** If the user asks to **store** something (remember,
 don't forget, note that, keep in mind), you MUST spawn a subagent.
 Do not load a memory digest first, do not run recall, do not do anything else
 first. Spawn the subagent immediately with the content to remember.
+
+**Critical rule (reflect):** If the user asks you to **reflect** on memory
+—**any** phrasing, including **"reflect on your memories"**, "reflect on
+your memory", "reflect on what you remember", dream, review your beliefs,
+time for a reflection, memory review—you **MUST spawn a dedicated
+`action: reflect` subagent** as the **first** action. See **Invariant:
+reflection always runs inside a subagent** above.
+
+You **MUST NOT** (on the **host** turn):
+
+- approximate reflection by reading a digest, `MEMORY.md`, or recall output
+  and narrating insights here;
+- run `memory-manage.py` / recall helpers from the host to "simulate" a
+  reflect pass while skipping a subagent;
+- skip the full workflow in `ref/reflect.md` + `ref/reflect-techniques.md` +
+  `ref/profile.md`.
+
+**Auto-reflect** after `action: remember` is **only** valid when it ran
+**inside the remember subagent** (`ref/retain.md`). It does **not** count
+as satisfying a **new** user request to reflect; for that you still
+**spawn `action: reflect`**.
+
+**Claiming reflection completed without a subagent having run the
+workflow is a skill violation.** After the reflect subagent returns,
+report what **it** did (belief deltas, pruning, reflections, curate, etc.)—
+do not substitute your own analysis for the subagent’s pass.
+
+**Same non-negotiable pattern** applies to **maintain** and **promote**:
+never replace a required subagent with an inline "I'll just read the
+files" shortcut; see the Subagent? column in the table above.
 
 ### How to spawn a remember subagent
 
@@ -43,9 +92,34 @@ evidence: <optional: issue id, CI id, doc path — never secrets>
 
 The subagent reads SKILL.md, follows the dispatch to `ref/format.md` +
 `ref/retain.md`, and executes the full retain workflow: entity extraction,
-duplicate checking, format validation, guarded write, and auto-reflect.
+duplicate checking, format validation, guarded write, and **auto-reflect
+when triggered**—**inside this same subagent**, never on the host
+(`ref/retain.md`).
 
 After the subagent completes, tell the user what was remembered.
+
+### How to spawn a reflect subagent
+
+Do this **immediately** when the user’s request matches **reflect** in the
+table—before narrating, before optional chit-chat, before loading a digest
+for your own summary.
+
+```text
+Read and follow skills/memory/SKILL.md.
+
+action: reflect
+```
+
+If the user restricts reflection to **project** or **user** memory only,
+state that in the same spawn message in plain language; the subagent
+applies `ref/reflect.md` and **curate** to the appropriate scope.
+
+The subagent executes the **entire** workflow in `ref/reflect.md`
+(including techniques and profile), updates beliefs/confidence as
+specified, synthesizes reflections when warranted, regenerates the curated
+master, and returns a completion report. **You** summarize that report for
+the user; you do not substitute your own one-shot analysis for the
+subagent’s pass.
 
 ## Architecture
 
@@ -147,7 +221,9 @@ all", or task done with no follow-up):
 1. Scan for uncaptured lessons, surprises, decisions, or workarounds.
 2. **Spawn a memory subagent** with `action: remember` for each item.
 3. **Tell the user what was remembered.**
-4. If the session was substantial, also spawn `action: reflect`.
+4. If the session was substantial, also spawn a **dedicated**
+   **`action: reflect` subagent** (never run reflect from the host turn;
+   see **Invariant: reflection always runs inside a subagent**).
 
 ## Subagent parameters (for write operations)
 
@@ -174,7 +250,7 @@ Full schema, defaults, rationale, and how to obtain resolved model ids: **`ref/c
 
 Before spawning a memory subagent, the host resolves `model_id` for the matching action per **`ref/config.md`** (or honors `model_preset` on the subagent payload when the user overrides). Use **`overrides.remember_when_auto_reflect`** when splitting a cheap retain pass from a stronger auto-reflect pass.
 
-**Per product (Cursor vs Claude vs Codex):** optional **`hosts.cursor`**, **`hosts.claude`**, and **`hosts.codex`** in `memory-skill.config.json` override presets (and optionally `actions` / `overrides`) for that tool only. Set environment variable **`MEMORY_SKILL_HOST`** to `cursor`, `claude`, or `codex` when running **config-hints** so the merged routing matches the active product (see **`ref/config.md`**).
+**Per product (Cursor vs Claude vs Codex):** optional **`hosts.*`** in `memory-skill.config.json` override globals for that tool. **config-hints** resolves the active tool via **`--host`**, then **`MEMORY_SKILL_HOST`**, then **automatic inference** (e.g. **`CLAUDECODE`** for Claude Code, Cursor trace/agent env vars). See **`ref/config.md`** and **`host_resolution`** in the hints JSON. Override with **`MEMORY_SKILL_HOST`** or **`--host`** when inference is wrong; use **`MEMORY_SKILL_DISABLE_HOST_INFERENCE=1`** to disable inference (e.g. tests).
 
 ## Invocation examples
 
@@ -208,6 +284,10 @@ Run digest recall per **`ref/recall.md`**: default both scopes; optional user-on
 Run structured recall per **`ref/recall.md`**: e.g. entity `api-gateway` with cross-section JSON, or keyword `database` with JSON—see that file for the full flag matrix.
 
 ### Reflect (spawn subagent)
+
+Same payload as **How to spawn a reflect subagent** above. **Invariant:**
+the host never runs `ref/reflect.md`; only a subagent does. See **Critical
+rule (reflect)**.
 
 ```text
 Read and follow skills/memory/SKILL.md.
