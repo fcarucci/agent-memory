@@ -6,7 +6,7 @@ No vector DB, no hosted black box: just **Markdown on disk**, a clear **retain �
 
 ## What this skill does
 
-- **Two tiers:** **user** memory at `~/.agents/memory/` and **project** memory at `<repo>/memory/` (shared, usually via promotion).
+- **Two tiers:** **user** memory at `~/.agents/memory/` and **project** memory at `<repo>/memory/`.
 - **Five memory types**, each in its own file: **experiences**, **world knowledge**, **beliefs**, **reflections**, and **entity summaries**.
 - **Curated master `MEMORY.md`** at scope root—a compact subset of world knowledge, beliefs, and entity summaries suitable for direct inclusion in `AGENTS.md`.
 - **Operations:** remember (guarded write), show/recall (read & search), reflect, maintain (including **maintenance-report** for stale / weak-source candidates), promote (user → project), forget, **migrate** (single → multi-file), **curate** (regenerate master from section files).
