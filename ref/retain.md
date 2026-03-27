@@ -183,6 +183,15 @@ If any trigger condition is met, run the full reflect workflow
 (see `ref/reflect.md`) **in the same subagent invocation** — do not
 return and ask the caller to spawn a separate reflect.
 
+### Post-reflect curation
+
+After the auto-reflect pass completes (or is skipped), **always**
+regenerate the curated master so `MEMORY.md` stays in sync:
+
+```bash
+python3 skills/memory/scripts/memory-manage.py curate --scope user
+```
+
 ### What to report
 
 In the subagent output, include:
@@ -190,6 +199,7 @@ In the subagent output, include:
 - Whether auto-reflect was triggered and which condition(s) fired.
 - If triggered: the reflect output (belief updates, pruning, summaries).
 - If not triggered: "auto-reflect: no action needed."
+- Whether the curated master was regenerated.
 
 ## Required output
 

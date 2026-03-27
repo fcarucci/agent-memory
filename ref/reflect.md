@@ -55,6 +55,11 @@ Reflect runs in two modes:
 11. If you manually update summaries, beliefs, or reflections, preserve
     structure and use the guarded-write discipline from `ref/retain.md`.
 12. Write the updated file.
+13. **Regenerate the curated master** so `MEMORY.md` stays in sync:
+    ```bash
+    python3 skills/memory/scripts/memory-manage.py curate --scope user
+    ```
+    (Use `--scope project` when reflecting on project memory.)
 
 ### Confidence evolution rules
 
@@ -84,6 +89,7 @@ separate explicit promotion decision.
 - Beliefs pruned (below threshold).
 - Reflections synthesized (if any), with source memories cited.
 - Entity summaries regenerated or suggested.
+- Curated master `MEMORY.md` regenerated.
 - Final counts per section.
 
 ## Maintain (`action: maintain`)
@@ -96,10 +102,15 @@ Run the supported maintenance cycle without adding a new memory:
 4. Check entity summary opportunities with `suggest-summaries`.
 5. Remove duplicates only when you can prove they are duplicates.
 6. Write the updated file.
+7. **Regenerate the curated master:**
+   ```bash
+   python3 skills/memory/scripts/memory-manage.py curate --scope user
+   ```
 
 ### Required output (maintain)
 
 - Beliefs updated or pruned.
 - Duplicates removed, if any.
 - Entity summaries refreshed or suggested.
+- Curated master `MEMORY.md` regenerated.
 - Final counts per section.

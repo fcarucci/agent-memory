@@ -49,7 +49,7 @@ It is **not** a faithful reproduction of every detail in the paper; it is a **pr
 ~/.agents/memory/entity_summaries.md
 ```
 
-Writes go to the **per-section files**. The curated master is regenerated on demand with `memory-manage.py curate`.
+Writes go to the **per-section files**. The curated master is regenerated automatically at the end of every **reflect** and **retain** (auto-reflect) operation, or on demand with `memory-manage.py curate`.
 
 ## Install
 
