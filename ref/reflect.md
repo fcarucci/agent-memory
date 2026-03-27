@@ -34,12 +34,16 @@ Reflect runs in two modes:
    contradict it (applying skepticism and literalism from the profile):
    use the **recall helper** with entity `belief-entity`, section `experiences`, JSON output (`ref/recall.md`).
 4. Compute base confidence deltas using the evolution rules below,
-   modulated by the behavioral profile (see `ref/profile.md`).
+   modulated by the behavioral profile (see `ref/profile.md`). For beliefs
+   with **no fresh supporting evidence**, use **temporal decay** (calendar
+   staleness and belief age), not a fixed per-run nibble — see **Temporal
+   decay** below and run **preview-belief-decay** on the memory file for JSON
+   hints (`ref/scripts.md`).
 5. **Apply reflect techniques** (read `ref/reflect-techniques.md`):
    - Self-verification probes — generate and check probe questions
    - Confidence calibration — weight deltas by evidence quality and β
    - Counterfactual analysis — assess dependency impact for beliefs ≥ 0.6
-6. Update confidence scores with the calibrated deltas using **update-confidence** (`--section beliefs`, `--index`, `--delta`).
+6. Update confidence scores with the calibrated deltas using **update-confidence** (`--section beliefs`, `--index`, `--delta`). For **temporal decay only**, add **`--no-bump-updated`** so `updated:` stays unchanged and staleness can accumulate until the belief is reinforced or contradicted (those updates omit the flag).
 7. **Detect belief conflicts** (technique 4, profile-aware resolution):
    run **check-conflicts**.
    Resolve flagged conflicts using the profile to break ties
@@ -63,7 +67,41 @@ Reflect runs in two modes:
 | Mildly contradicting | -0.1 | An exception was found but doesn't invalidate |
 | Strongly contradicting | -0.2 | The belief was wrong in a significant case |
 | Promotion-worthy (→ World Knowledge) | n/a | Move from Beliefs to World Knowledge at 0.85+ with 3+ sources |
-| Decay (no recent evidence) | -0.01 | Belief is old with no new supporting evidence |
+| Temporal decay (no fresh support) | see **Temporal decay** | Scales with calendar time since `updated` (and slightly with belief age), capped per application — **not** a fixed penalty on every reflect run |
+
+### Temporal decay (no fresh supporting evidence)
+
+**Intent:** Confidence should drift down **slowly** when nothing in recent memory
+supports the belief — driven by **how long** the belief has gone without a
+substantive update, not by how often reflect runs.
+
+1. After step 3, for each belief judged **without** fresh supporting (or
+   contradicting) evidence, read **staleness** = whole calendar days from the
+   belief line’s **`updated:`** date to today; if `updated:` is missing, use
+   **`formed:`**.
+2. Read **belief age** = whole calendar days from **`formed:`** to today; if
+   `formed:` is missing, use the same reference as staleness.
+3. **Grace window:** if staleness ≤ **14 days**, apply **no** temporal decay
+   (0 delta) for that belief on this pass.
+4. Otherwise compute the decay delta with the management helper (same
+   defaults the CLI uses):
+
+   `python3 skills/memory/scripts/memory-manage.py preview-belief-decay --scope user`
+
+   Use the JSON field `temporal_decay_if_unsupported` for that belief index
+   (negative float or 0). Alternatively, call
+   `compute_temporal_decay_delta(staleness_days, belief_age_days)` from the
+   helper module when scripting.
+
+5. Apply the delta with **update-confidence** and **`--no-bump-updated`** so
+   **`updated:`** is **not** set to today. Reinforcement (+), contradiction
+   (−), and other non-decay adjustments **must** omit `--no-bump-updated` so
+   `updated:` advances and the staleness clock resets.
+
+**Note:** Running reflect twice the same day can apply decay twice if the
+belief still lacks support and staleness is above the grace window; hosts
+should avoid redundant reflect spawns the same day for the same scope when
+possible.
 
 ### Outcome-aware adjustments
 

@@ -76,7 +76,7 @@ indirect evidence.
 ### How to apply
 
 1. Determine the base delta from the confidence evolution rules in
-   `ref/reflect.md` (+0.1, -0.1, -0.2, or -0.05).
+   `ref/reflect.md` (+0.1, -0.1, -0.2, or temporal decay from **preview-belief-decay** / `compute_temporal_decay_delta`).
 2. Assess the strongest piece of evidence driving the update.
 3. Multiply: `effective_delta = base_delta × multiplier`.
 4. Round to 2 decimal places.
@@ -88,8 +88,9 @@ indirect evidence.
   Effective: `+0.1 × 1.5 = +0.15`
 - Base delta: -0.2 (strong contradiction). Evidence is indirect and stale.
   Effective: `-0.2 × 0.25 = -0.05`
-- Base delta: -0.05 (decay). No multiplier applies to decay — it is
-  time-based, not evidence-based. Use -0.05 as-is.
+- Base delta: temporal decay (negative, often 0 if staleness ≤ 14 days). No
+  multiplier applies — decay is already calendar-based. Apply via
+  **update-confidence** with **`--no-bump-updated`** (`ref/reflect.md`).
 
 ---
 

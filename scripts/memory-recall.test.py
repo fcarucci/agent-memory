@@ -356,6 +356,54 @@ class TestConfidenceUpdate(unittest.TestCase):
         result = manage.update_confidence(self.path, "experiences", 0, 0.1)
         self.assertFalse(result["success"])
 
+    def test_no_bump_updated_preserves_belief_date(self):
+        tmp = Path(tempfile.mkdtemp())
+        path = tmp / "mem.md"
+        path.write_text(
+            "## Beliefs\n\n"
+            "- {entities: x} Test belief. "
+            "(confidence: 0.65, formed: 2025-01-01, updated: 2025-06-01)\n\n",
+            encoding="utf-8",
+        )
+        result = manage.update_confidence(
+            path, "beliefs", 0, -0.02, bump_updated=False
+        )
+        self.assertTrue(result["success"])
+        bank = recall.parse_memory_file(path)
+        self.assertEqual(bank.beliefs[0].updated, "2025-06-01")
+        self.assertEqual(bank.beliefs[0].confidence, 0.63)
+
+
+class TestTemporalDecay(unittest.TestCase):
+    def test_grace_window_zero(self):
+        self.assertEqual(manage.compute_temporal_decay_delta(14, 400), 0.0)
+        self.assertEqual(manage.compute_temporal_decay_delta(5, 400), 0.0)
+
+    def test_beyond_grace_negative(self):
+        d = manage.compute_temporal_decay_delta(60, 30)
+        self.assertLess(d, 0.0)
+
+    def test_capped_magnitude(self):
+        d = manage.compute_temporal_decay_delta(10_000, 10_000)
+        self.assertGreaterEqual(d, -0.04)
+        self.assertLessEqual(d, 0.0)
+
+    def test_preview_belief_temporal_decay_shape(self):
+        tmp = Path(tempfile.mkdtemp())
+        path = tmp / "mem.md"
+        path.write_text(
+            "## Beliefs\n\n"
+            "- {entities: a} One. "
+            "(confidence: 0.70, formed: 2025-01-01, updated: 2025-01-01)\n\n",
+            encoding="utf-8",
+        )
+        as_of = __import__("datetime").date(2026, 3, 27)
+        out = manage.preview_belief_temporal_decay(path, as_of=as_of)
+        self.assertEqual(out["as_of"], "2026-03-27")
+        self.assertEqual(len(out["beliefs"]), 1)
+        self.assertIn("staleness_days", out["beliefs"][0])
+        self.assertIn("temporal_decay_if_unsupported", out["beliefs"][0])
+
 
 class TestEntityExtraction(unittest.TestCase):
     def test_backtick_entities_are_canonicalized(self):

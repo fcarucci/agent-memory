@@ -26,6 +26,14 @@ from typing import Any, Optional
 
 _VALID_OUTCOMES = frozenset({"success", "failure", "mixed", "unknown"})
 
+# Belief temporal decay (reflect: no fresh supporting evidence). Tuned for slow,
+# calendar-based drift — not a fixed penalty every reflect run.
+TEMPORAL_DECAY_GRACE_DAYS = 14
+TEMPORAL_DECAY_RATE = 0.00012  # per stale day beyond grace
+TEMPORAL_DECAY_MAX_DELTA = 0.04  # cap magnitude per application
+TEMPORAL_DECAY_AGE_SCALE_DAYS = 365.0
+TEMPORAL_DECAY_AGE_BOOST = 0.25  # up to +25% when belief is ≥1 year old
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from importlib import import_module
 
@@ -887,10 +895,90 @@ def check_duplicate(path: Path, section: str, candidate: str,
     }
 
 
-def update_confidence(path: Path, section: str, index: int, delta: float) -> dict:
+def compute_temporal_decay_delta(
+    staleness_days: int,
+    belief_age_days: int,
+    *,
+    grace_days: int = TEMPORAL_DECAY_GRACE_DAYS,
+    rate: float = TEMPORAL_DECAY_RATE,
+    max_delta: float = TEMPORAL_DECAY_MAX_DELTA,
+    age_scale_days: float = TEMPORAL_DECAY_AGE_SCALE_DAYS,
+    age_boost: float = TEMPORAL_DECAY_AGE_BOOST,
+) -> float:
+    """Negative confidence delta when a belief lacks support; 0 if not stale enough.
+
+    *staleness_days* — calendar days since ``updated`` (fallback ``formed``): time
+    since the belief line last reflected substantive change. Decay applications
+    should use ``update_confidence(..., bump_updated=False)`` so this clock does
+    not reset on decay-only updates.
+
+    *belief_age_days* — calendar days since ``formed`` (fallback ``updated``):
+    older beliefs decay slightly faster once past the grace window.
+    """
+    if staleness_days <= grace_days:
+        return 0.0
+    excess = staleness_days - grace_days
+    age_factor = 1.0 + min(1.0, max(0, belief_age_days) / age_scale_days) * age_boost
+    raw = rate * excess * age_factor
+    return -round(min(max_delta, raw), 2)
+
+
+def preview_belief_temporal_decay(path: Path, as_of: Optional[date] = None) -> dict:
+    """Per-belief staleness/age and the temporal decay delta if unsupported.
+
+    Subagents use this during reflect after deciding a belief has no fresh
+    supporting evidence; reinforcement/contradiction use normal deltas with
+    ``bump_updated`` left True (default).
+    """
+    as_of_d = as_of or date.today()
+    bank = recall_mod.parse_memory_file(path)
+    rows: list[dict[str, Any]] = []
+    for i, b in enumerate(bank.beliefs):
+        upd = _parse_iso_date_string(b.updated)
+        frm = _parse_iso_date_string(b.formed)
+        ref = upd or frm
+        if ref is None:
+            rows.append(
+                {
+                    "index": i,
+                    "staleness_days": None,
+                    "belief_age_days": None,
+                    "temporal_decay_if_unsupported": 0.0,
+                    "note": "missing formed/updated dates",
+                }
+            )
+            continue
+        staleness_days = max(0, (as_of_d - ref).days)
+        age_ref = frm or upd
+        assert age_ref is not None
+        belief_age_days = max(0, (as_of_d - age_ref).days)
+        rows.append(
+            {
+                "index": i,
+                "staleness_days": staleness_days,
+                "belief_age_days": belief_age_days,
+                "temporal_decay_if_unsupported": compute_temporal_decay_delta(
+                    staleness_days, belief_age_days
+                ),
+            }
+        )
+    return {"as_of": as_of_d.isoformat(), "beliefs": rows}
+
+
+def update_confidence(
+    path: Path,
+    section: str,
+    index: int,
+    delta: float,
+    *,
+    bump_updated: bool = True,
+) -> dict:
     """Deterministically update a confidence score and rewrite the file.
 
     delta > 0 reinforces, delta < 0 weakens. Clamped to [0.0, 1.0].
+    For belief *temporal decay* (no new support), pass bump_updated=False so
+    ``updated`` stays unchanged and staleness accumulates until reinforcement
+    or contradiction bumps it.
     """
     if section not in ("beliefs", "world_knowledge"):
         return {"success": False, "error": f"Section '{section}' does not have confidence scores"}
@@ -939,8 +1027,8 @@ def update_confidence(path: Path, section: str, index: int, delta: float) -> dic
 
     new_line = line[:conf_match.start(1)] + f"{new_conf}" + line[conf_match.end(1):]
 
-    if section == "beliefs":
-        today = __import__("datetime").date.today().isoformat()
+    if section == "beliefs" and bump_updated:
+        today = date.today().isoformat()
         updated_match = recall_mod.UPDATED_RE.search(new_line)
         if updated_match:
             new_line = new_line[:updated_match.start(1)] + today + new_line[updated_match.end(1):]
@@ -1942,6 +2030,25 @@ def main():
     conf_parser.add_argument("--index", required=True, type=int)
     conf_parser.add_argument("--delta", required=True, type=float,
                              help="Amount to add (positive=reinforce, negative=weaken)")
+    conf_parser.add_argument(
+        "--no-bump-updated",
+        action="store_true",
+        help=(
+            "Beliefs only: do not set updated: to today — use for temporal decay "
+            "so staleness accumulates until reinforcement/contradiction"
+        ),
+    )
+
+    pbd_parser = sub.add_parser(
+        "preview-belief-decay",
+        help="JSON: per-belief staleness/age and temporal decay delta if unsupported",
+    )
+    pbd_parser.add_argument(
+        "--as-of",
+        metavar="YYYY-MM-DD",
+        default=None,
+        help="Reference date (default: today)",
+    )
 
     ent_parser = sub.add_parser("extract-entities", help="Extract entity candidates from text")
     ent_parser.add_argument("--text", required=True)
@@ -2095,7 +2202,17 @@ def main():
     elif args.command == "update-confidence":
         scope = effective_scope("user")
         target = _resolve_section_file_for_write(scope, args.section, args.file)
-        result = update_confidence(target, args.section, args.index, args.delta)
+        bump = True
+        if args.section == "beliefs":
+            bump = not args.no_bump_updated
+        result = update_confidence(
+            target, args.section, args.index, args.delta, bump_updated=bump
+        )
+    elif args.command == "preview-belief-decay":
+        scope = effective_scope("user")
+        target = _resolve_section_file_for_read(scope, "beliefs", args.file)
+        as_of = _parse_iso_date_string(args.as_of) if args.as_of else None
+        result = preview_belief_temporal_decay(target, as_of=as_of)
     elif args.command == "extract-entities":
         result = extract_entities(args.text)
     elif args.command == "screen-text":
