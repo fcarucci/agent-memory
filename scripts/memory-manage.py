@@ -1235,8 +1235,8 @@ def migrate(master_path: Path, scope: str) -> dict:
     """Split a single-file MEMORY.md into per-section files.
 
     Existing section files are NOT overwritten; only missing entries are
-    appended.  After migration the master is replaced with the curated
-    template (the original is backed up as ``MEMORY.md.bak``).
+    appended.  After migration the master is overwritten with the curated
+    template (no ``.bak`` file).
     """
     if not master_path.exists():
         return {"success": False, "error": "Master MEMORY.md does not exist"}
@@ -1276,8 +1276,6 @@ def migrate(master_path: Path, scope: str) -> dict:
         sf_path.write_text(content, encoding="utf-8")
         written[section_name] = len(new_entries)
 
-    backup = master_path.parent / (master_path.name + ".bak")
-    master_path.rename(backup)
     template = (
         recall_mod.USER_MEMORY_TEMPLATE if scope == "user"
         else recall_mod.CURATED_MASTER_TEMPLATE
@@ -1286,23 +1284,73 @@ def migrate(master_path: Path, scope: str) -> dict:
 
     return {
         "success": True,
-        "backup": str(backup),
         "section_dir": str(section_dir),
         "entries_migrated": written,
     }
 
 
-def curate(scope: str, *, max_world: int = 10, max_beliefs: int = 10,
-           max_summaries: int = 20) -> dict:
-    """Regenerate the curated master MEMORY.md from section files.
+def _curated_preview_line(text: str, max_len: int = 140) -> str:
+    """Single-line preview for curated MEMORY.md (whitespace collapsed, optional ellipsis)."""
+    t = " ".join(text.split())
+    if not t:
+        return "(empty)"
+    if len(t) <= max_len:
+        return t
+    return t[: max_len - 1].rstrip() + "…"
 
-    Picks the highest-confidence world knowledge / beliefs and all
-    entity summaries (capped).  Experiences and reflections are omitted
-    from the curated file because they are verbose and temporal.
+
+def _curated_section_href(scope: str, section_key: str) -> str:
+    """Path from MEMORY.md to the section file (markdown link target)."""
+    fname = recall_mod.SECTION_FILES[section_key]
+    if scope == "user":
+        return fname
+    return f"memory/{fname}"
+
+
+def curate(scope: str, *, max_world: int = 5, max_beliefs: int = 5,
+           max_summaries: int = 10) -> dict:
+    """Regenerate the thin curated master ``MEMORY.md``.
+
+    **Legacy monolithic master:** If ``MEMORY.md`` is not a curated stub but
+    contains memory entries, **migrate** runs first (entries go to
+    per-section files; the master is overwritten—no ``.bak`` file).
+
+    **Normal path:** Loads from section files and overwrites the master with
+    **one-line previews** (highest-confidence world knowledge and beliefs,
+    capped entity summaries) plus links to each section file. Any fat content
+    pasted back into a curated shell is dropped in favor of section files.
+    Experiences and reflections stay out of the master because they are verbose
+    and temporal.
     """
+    master = (recall_mod.resolve_user_memory_path() if scope == "user"
+              else recall_mod.resolve_project_memory_path())
     section_dir = recall_mod.resolve_section_dir(scope)
+
+    migrated: Optional[dict] = None
+    if master.exists():
+        bank_m = recall_mod.parse_memory_file(master)
+        n_master = (
+            len(bank_m.experiences)
+            + len(bank_m.world_knowledge)
+            + len(bank_m.beliefs)
+            + len(bank_m.reflections)
+            + len(bank_m.entity_summaries)
+        )
+        legacy_journal = not _memory_master_is_curated(master) and n_master > 0
+        if legacy_journal:
+            migrated = migrate(master, scope)
+            if not migrated.get("success"):
+                return migrated
+
     if not recall_mod.has_section_files(section_dir):
-        return {"success": False, "error": "No section files found; nothing to curate"}
+        return {
+            "success": False,
+            "error": (
+                "No section files found; nothing to curate. "
+                "For a legacy single-file MEMORY.md with entries, curate "
+                "migrates automatically — ensure MEMORY.md exists and is readable."
+            ),
+        }
 
     bank = recall_mod.load_memory_from_sections(section_dir)
 
@@ -1311,7 +1359,7 @@ def curate(scope: str, *, max_world: int = 10, max_beliefs: int = 10,
     lines.append(title)
     lines.append("")
     lines.append("<!-- Curated subset suitable for inclusion in AGENTS.md.")
-    lines.append("     Full memories are stored in per-section files.")
+    lines.append("     One-line previews; follow links for full markdown in section files.")
     lines.append("     Regenerate via memory skill curation (SKILL.md / ref/retain.md) -->")
     lines.append("")
 
@@ -1321,7 +1369,11 @@ def curate(scope: str, *, max_world: int = 10, max_beliefs: int = 10,
     lines.append("## World Knowledge")
     lines.append("")
     for w in wk:
-        lines.append(w.raw)
+        lines.append(f"- {_curated_preview_line(w.text)}")
+    wk_href = _curated_section_href(scope, "world_knowledge")
+    wk_fname = recall_mod.SECTION_FILES["world_knowledge"]
+    lines.append("")
+    lines.append(f"*Full section: [{wk_fname}]({wk_href})*")
     lines.append("")
 
     beliefs = sorted(bank.beliefs,
@@ -1330,28 +1382,39 @@ def curate(scope: str, *, max_world: int = 10, max_beliefs: int = 10,
     lines.append("## Beliefs")
     lines.append("")
     for b in beliefs:
-        lines.append(b.raw)
+        lines.append(f"- {_curated_preview_line(b.text)}")
+    bl_href = _curated_section_href(scope, "beliefs")
+    bl_fname = recall_mod.SECTION_FILES["beliefs"]
+    lines.append("")
+    lines.append(f"*Full section: [{bl_fname}]({bl_href})*")
     lines.append("")
 
     lines.append("## Entity Summaries")
     lines.append("")
-    for es in bank.entity_summaries[:max_summaries]:
-        lines.append(es.raw)
+    es_slice = bank.entity_summaries[:max_summaries]
+    for es in es_slice:
+        prev = _curated_preview_line(es.text)
+        lines.append(f"- **{es.name}**: {prev}")
+    es_href = _curated_section_href(scope, "entity_summaries")
+    es_fname = recall_mod.SECTION_FILES["entity_summaries"]
+    lines.append("")
+    lines.append(f"*Full section: [{es_fname}]({es_href})*")
     lines.append("")
 
-    master = (recall_mod.resolve_user_memory_path() if scope == "user"
-              else recall_mod.resolve_project_memory_path())
     master.write_text("\n".join(lines), encoding="utf-8")
 
-    return {
+    result: dict = {
         "success": True,
         "path": str(master),
         "counts": {
             "world_knowledge": len(wk),
             "beliefs": len(beliefs),
-            "entity_summaries": min(len(bank.entity_summaries), max_summaries),
+            "entity_summaries": len(es_slice),
         },
     }
+    if migrated is not None:
+        result["migrated"] = migrated
+    return result
 
 
 def _parse_iso_date_string(value: Optional[str]) -> Optional[date]:
@@ -2151,10 +2214,13 @@ def main():
 
     sub.add_parser("migrate", help="Split a single-file MEMORY.md into per-section files")
 
-    curate_parser = sub.add_parser("curate", help="Regenerate curated master from section files")
-    curate_parser.add_argument("--max-world", type=int, default=10)
-    curate_parser.add_argument("--max-beliefs", type=int, default=10)
-    curate_parser.add_argument("--max-summaries", type=int, default=20)
+    curate_parser = sub.add_parser(
+        "curate",
+        help="Regenerate thin curated MEMORY.md (previews + links) from section files",
+    )
+    curate_parser.add_argument("--max-world", type=int, default=5)
+    curate_parser.add_argument("--max-beliefs", type=int, default=5)
+    curate_parser.add_argument("--max-summaries", type=int, default=10)
 
     sub.add_parser(
         "validate-config",

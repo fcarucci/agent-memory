@@ -1458,9 +1458,9 @@ class TestMigrate(unittest.TestCase):
         self.assertEqual(result["entries_migrated"]["beliefs"], 2)
         self.assertEqual(result["entries_migrated"]["reflections"], 1)
 
-    def test_migrate_backs_up_master(self):
+    def test_migrate_does_not_create_bak(self):
         manage.migrate(self.master, "project")
-        self.assertTrue((self.tmp / "MEMORY.md.bak").exists())
+        self.assertFalse((self.tmp / "MEMORY.md.bak").exists())
 
     def test_migrate_replaces_master_with_curated(self):
         manage.migrate(self.master, "project")
@@ -1496,6 +1496,42 @@ class TestCurate(unittest.TestCase):
             self.assertIn("listen_addresses", content)
             self.assertIn("combined dev command", content)
             self.assertIn("postgresql", content)
+            self.assertIn("[world_knowledge.md](memory/world_knowledge.md)", content)
+            self.assertIn("[beliefs.md](memory/beliefs.md)", content)
+            self.assertIn("[entity_summaries.md](memory/entity_summaries.md)", content)
+            self.assertNotIn("migrated", result)
+        finally:
+            recall.resolve_project_memory_path = old_recall
+            recall.resolve_section_dir = old_section
+
+    def test_curate_migrates_legacy_monolithic_master_then_thins(self):
+        """Big single-file MEMORY.md with no section dir: migrate + thin master."""
+        tmp = Path(tempfile.mkdtemp())
+        master = tmp / "MEMORY.md"
+        master.write_text(SAMPLE_MEMORY, encoding="utf-8")
+        section_dir = tmp / "memory"
+        self.assertFalse(section_dir.exists())
+
+        old_recall = recall.resolve_project_memory_path
+        old_section = recall.resolve_section_dir
+        recall.resolve_project_memory_path = lambda: master
+        recall.resolve_section_dir = lambda s: section_dir if s == "project" else old_section(s)
+        try:
+            result = manage.curate("project")
+            self.assertTrue(result["success"], result)
+            self.assertIn("migrated", result)
+            self.assertTrue(result["migrated"]["success"])
+            self.assertFalse((tmp / "MEMORY.md.bak").exists())
+            self.assertTrue((section_dir / "experiences.md").exists())
+            content = master.read_text(encoding="utf-8")
+            self.assertIn("Curated subset", content)
+            self.assertIn("listen_addresses", content)
+            self.assertLess(len(content), len(SAMPLE_MEMORY) // 2)
+            self.assertNotIn(
+                "The integration test suite hung indefinitely because another process",
+                content,
+            )
+            self.assertNotIn("Multiple debugging sessions revealed", content)
         finally:
             recall.resolve_project_memory_path = old_recall
             recall.resolve_section_dir = old_section
@@ -1693,11 +1729,11 @@ class TestAutoMigrate(unittest.TestCase):
         content = self.master.read_text(encoding="utf-8")
         self.assertIn("Curated subset", content)
 
-    def test_backup_created(self):
+    def test_no_bak_after_auto_migrate(self):
         recall.load_memory(self.master, self.section_dir)
-        self.assertTrue((self.tmp / "MEMORY.md.bak").exists())
-        bak_content = (self.tmp / "MEMORY.md.bak").read_text(encoding="utf-8")
-        self.assertIn("## Experiences", bak_content)
+        self.assertFalse((self.tmp / "MEMORY.md.bak").exists())
+        exp = (self.section_dir / "experiences.md").read_text(encoding="utf-8")
+        self.assertIn("## Experiences", exp)
 
     def test_no_auto_migrate_when_sections_exist(self):
         _write_section_files(self.section_dir)

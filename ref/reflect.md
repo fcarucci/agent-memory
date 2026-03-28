@@ -56,8 +56,11 @@ Reflect runs in two modes:
 11. If you manually update summaries, beliefs, or reflections, preserve
     structure and use the guarded-write discipline from `ref/retain.md`.
 12. Write the updated file.
-13. **Regenerate the curated master** so `MEMORY.md` stays in sync:
-    **curate** with `--scope user` (use `--scope project` when reflecting on project memory).
+13. **Regenerate the curated master** so `MEMORY.md` stays in sync (thin
+    one-line previews + links to section files): **curate** with
+    `--scope user` (use `--scope project` when reflecting on project memory).
+    The user can also trigger curation anytime without a full reflect pass;
+    see **`ref/curate.md`**.
 
 ### Confidence evolution rules
 

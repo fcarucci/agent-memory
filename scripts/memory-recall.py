@@ -70,7 +70,7 @@ CURATED_MASTER_TEMPLATE = """\
 # Agent Memory
 
 <!-- Curated subset suitable for inclusion in AGENTS.md.
-     Full memories are stored in per-section files.
+     One-line previews + links to per-section files for full text.
      Regenerate via memory skill curation (SKILL.md / ref/retain.md) -->
 
 ## World Knowledge
@@ -83,7 +83,7 @@ CURATED_MASTER_TEMPLATE = """\
 USER_MEMORY_TEMPLATE = """\
 # User Memory
 
-<!-- Curated subset. Full memories in per-section files alongside this file. -->
+<!-- Curated subset: short preview lines; open linked section files for full entries. -->
 
 ## World Knowledge
 
@@ -247,8 +247,8 @@ def auto_migrate(master_path: Path, section_dir: Path) -> None:
     """Split a legacy single-file MEMORY.md into per-section files.
 
     Called transparently on first load when section files are absent
-    but the master contains entries.  Backs up the original as
-    ``MEMORY.md.bak`` and replaces the master with the curated template.
+    but the master contains entries.  Replaces the master with the
+    curated template after writing section files (no ``.bak`` backup).
     """
     bank = parse_memory_file(master_path)
     section_dir.mkdir(parents=True, exist_ok=True)
@@ -262,11 +262,6 @@ def auto_migrate(master_path: Path, section_dir: Path) -> None:
         for entry in items:
             content = content.rstrip("\n") + "\n\n" + entry.raw + "\n"
         sf.write_text(content, encoding="utf-8")
-
-    backup = master_path.parent / (master_path.name + ".bak")
-    if not backup.exists():
-        import shutil
-        shutil.copy2(master_path, backup)
 
     is_user = "User Memory" in master_path.read_text(encoding="utf-8")
     template = USER_MEMORY_TEMPLATE if is_user else CURATED_MASTER_TEMPLATE

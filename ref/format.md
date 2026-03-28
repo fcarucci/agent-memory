@@ -2,12 +2,54 @@
 
 ## Memory file structure
 
-Memories live in two files with identical structure:
+### Canonical layout (current)
 
-- **User**: `~/.agents/memory/MEMORY.md` (created on first recall or write to user scope)
-- **Project**: `<repo>/MEMORY.md` (committed to version control)
+**Full memories** are stored **one file per memory network** (section). The
+helpers load these when present; see `scripts/memory-recall.py` (`SECTION_FILES`).
 
-Required structure (same for both files):
+| Network | Filename |
+|---------|----------|
+| Experiences | `experiences.md` |
+| World Knowledge | `world_knowledge.md` |
+| Beliefs | `beliefs.md` |
+| Reflections | `reflections.md` |
+| Entity Summaries | `entity_summaries.md` |
+
+Each section file contains a single `##` heading for that network (see
+templates in `memory-recall.py` `SECTION_TEMPLATES`) and the bullets or
+subsections described later in this document under each format heading.
+
+**Where the section files live** depends on scope:
+
+- **User**: alongside `~/.agents/memory/MEMORY.md` — same directory
+  (`~/.agents/memory/`).
+- **Project**: under `<repo>/memory/` (next to the repo-root `MEMORY.md`).
+
+**Curated master `MEMORY.md`** (user or project root) is **not** a duplicate
+of everything. The **`curate`** helper (see `memory-manage.py`) **replaces**
+the master with **one-line previews** of the top world-knowledge / belief /
+entity-summary items (by confidence and order), plus **markdown links** to
+the section files for full text—intended for a thin include from
+`AGENTS.md`. If `MEMORY.md` is still a **legacy monolithic** journal (not a
+curated stub) with entries, **`curate` runs `migrate` first**: content moves
+into per-section files, then the master is overwritten with the thin curated
+file (no `MEMORY.md.bak`). Full entries live in the per-section files.
+Regeneration is driven by the memory skill (curation / retain / reflect); see
+`SKILL.md` and `ref/retain.md`.
+
+**Project root note:** `<repo>/MEMORY.md` is still the anchor path the
+helpers use to resolve the repo; section files for project scope are under
+`<repo>/memory/`.
+
+### Legacy single-file layout
+
+Older setups may use **one `MEMORY.md`** containing all five `##` sections in
+a single document (same headings and bullet rules as today). The recall
+loader can **migrate** that into per-section files when appropriate (see
+`load_memory` / `auto_migrate` / split operations in `memory-manage.py`).
+Prefer the canonical layout for new writes.
+
+Legacy monolithic template (backward compatibility only):
 
 ```markdown
 # Agent Memory

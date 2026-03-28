@@ -23,6 +23,7 @@ request to an action, then follow only that action's instructions.
 | "What do you know about X?", "Any memories about Y?" | **recall** | No | `ref/recall.md` |
 | "Reflect on your memory", "Reflect on your memories", "Reflect on what you remember", "Dream", "Time for a reflection", "Review your beliefs", "Memory reflection", "Do a memory reflect" | **reflect** | **YES — dedicated subagent ONLY (host never runs reflect)** | `ref/reflect.md` + `ref/reflect-techniques.md` + `ref/profile.md` |
 | "Maintain memory", "Clean up memory", "Prune stale memories", "Memory hygiene" | **maintain** | **YES — spawn subagent** | `ref/maintain.md` + `ref/reflect.md` (belief rules) |
+| "Curate your memories", "Curate my memories", "Curate memory", "Memory curate", "Thin MEMORY.md", "Shrink MEMORY.md", "Regenerate the memory index" | **curate** | No | `ref/curate.md` + `ref/format.md` |
 | "Forget about X", "Delete that memory", "Remove the belief about Y" | **forget** | No | `ref/forget.md` |
 | "Promote this to the project" | **promote** | **YES — spawn subagent** | `ref/promote.md` |
 
@@ -320,6 +321,12 @@ section: experiences
 index: 0
 allow_project_promotion: true
 ```
+
+### Curate (run directly)
+
+When the user asks to **curate** memories (see dispatch table), run the
+management helper **curate** per **`ref/curate.md`**. No subagent — report
+paths, counts, and any **migrate** that ran.
 
 ### Forget (run directly)
 
