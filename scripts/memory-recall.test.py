@@ -476,6 +476,7 @@ class TestManageCliErgonomics(unittest.TestCase):
     def test_validate_accepts_scope_after_subcommand(self):
         script = Path(manage.__file__).resolve()
         with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
             env = os.environ.copy()
             env["HOME"] = td
             subprocess.run(
@@ -486,9 +487,12 @@ class TestManageCliErgonomics(unittest.TestCase):
                 text=True,
                 check=True,
             )
+            # Make project scope invalid so the command must honor the
+            # subcommand-level --scope user override to pass.
+            (root / "MEMORY.md").write_text("not a valid memory file\n", encoding="utf-8")
             r = subprocess.run(
                 [sys.executable, str(script), "validate", "--scope", "user"],
-                cwd=str(script.parent),
+                cwd=str(root),
                 env=env,
                 capture_output=True,
                 text=True,

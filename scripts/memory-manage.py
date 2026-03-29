@@ -2331,7 +2331,7 @@ def main():
         return getattr(args, "command_scope", None) or args.scope or default
 
     if args.command == "validate":
-        result = validate(get_path("project"))
+        result = validate(resolve_path(effective_scope("project")) if not args.file else args.file)
     elif args.command == "validate-sections":
         result = validate_sections(effective_scope("project"))
     elif args.command == "check-duplicate":
