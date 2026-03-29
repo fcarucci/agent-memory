@@ -87,7 +87,8 @@ substantive update, not by how often reflect runs.
 3. **Grace window:** if staleness ≤ **14 days**, apply **no** temporal decay
    (0 delta) for that belief on this pass.
 4. Otherwise compute the decay delta with the management helper (same
-   defaults the CLI uses):
+   defaults the CLI uses; scope may be supplied before or after the
+   subcommand):
 
    `python3 skills/memory/scripts/memory-manage.py preview-belief-decay --scope user`
 
@@ -145,4 +146,3 @@ separate explicit promotion decision.
 - Entity summaries regenerated or suggested.
 - Curated master `MEMORY.md` regenerated.
 - Final counts per section.
-

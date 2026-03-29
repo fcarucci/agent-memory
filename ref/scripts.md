@@ -21,6 +21,11 @@ Supports **validation**, **screening**, **guarded append** (including optional *
 - **`ref/task-done.md`** — **task-done sweep** / session-end (remember what you learned)
 - **`ref/config.md`** — `memory-skill.config.json`
 
+Ergonomics for integrators and hosts:
+
+- Scope-aware commands accept **`--scope`** either before or after the subcommand, including host-run operations such as **`validate`**, **`validate-sections`**, **`curate`**, and **`migrate`**.
+- Free-text commands such as **`screen-text`**, **`extract-entities`**, and **`check-duplicate`** accept inline text plus file/stdin variants so callers can avoid brittle shell quoting when text contains apostrophes or other shell-sensitive characters.
+
 ## Automated tests
 
 Maintainers run the bundled tests in `skills/memory/scripts/` after changing helper code, using the same Python environment the repo expects.

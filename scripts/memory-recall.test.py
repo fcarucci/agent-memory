@@ -472,6 +472,72 @@ class TestEntityExtraction(unittest.TestCase):
         self.assertEqual(result["count"], 0)
 
 
+class TestManageCliErgonomics(unittest.TestCase):
+    def test_validate_accepts_scope_after_subcommand(self):
+        script = Path(manage.__file__).resolve()
+        with tempfile.TemporaryDirectory() as td:
+            env = os.environ.copy()
+            env["HOME"] = td
+            subprocess.run(
+                [sys.executable, str(script), "init-user"],
+                cwd=str(script.parent),
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            r = subprocess.run(
+                [sys.executable, str(script), "validate", "--scope", "user"],
+                cwd=str(script.parent),
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+            data = json.loads(r.stdout)
+            self.assertTrue(data["valid"])
+
+    def test_check_duplicate_accepts_scope_after_subcommand(self):
+        script = Path(manage.__file__).resolve()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _write_sample(root)
+            r = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "check-duplicate",
+                    "--scope",
+                    "project",
+                    "--section",
+                    "experiences",
+                    "--candidate",
+                    "The integration test suite hung indefinitely because another process was already bound to port 5432.",
+                ],
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+            data = json.loads(r.stdout)
+            self.assertTrue(data["is_duplicate"])
+
+    def test_screen_text_accepts_stdin_input(self):
+        script = Path(manage.__file__).resolve()
+        text = "OpenClaw's gateway layer routed the request correctly."
+        r = subprocess.run(
+            [sys.executable, str(script), "screen-text", "--text-stdin"],
+            cwd=str(script.parent),
+            input=text,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        data = json.loads(r.stdout)
+        self.assertTrue(data["safe"])
+        self.assertEqual(data["sanitized_text"], text)
+
+
 class TestSensitiveScreening(unittest.TestCase):
     def test_detects_secret_assignment(self):
         result = manage.screen_text(

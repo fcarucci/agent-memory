@@ -2062,6 +2062,60 @@ def _resolve_section_file_for_read(scope: str, section: str,
     return resolve_path(scope)
 
 
+def _add_scope_option(parser: argparse.ArgumentParser) -> None:
+    """Allow scope after the subcommand as well as before it."""
+    parser.add_argument(
+        "--scope",
+        dest="command_scope",
+        choices=["user", "project"],
+        default=None,
+        help="Memory scope for this command (overrides top-level --scope)",
+    )
+
+
+def _add_text_like_input_options(
+    parser: argparse.ArgumentParser,
+    *,
+    name: str,
+    required_help: str,
+) -> None:
+    """Add ergonomic input flags for free-text arguments.
+
+    Using stdin or a file avoids brittle shell quoting for apostrophes and other
+    punctuation in natural-language memory text.
+    """
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(f"--{name}", dest=name, help=required_help)
+    group.add_argument(
+        f"--{name}-file",
+        dest=f"{name}_file",
+        type=Path,
+        help=f"Read {name.replace('_', ' ')} from a file",
+    )
+    group.add_argument(
+        f"--{name}-stdin",
+        dest=f"{name}_stdin",
+        action="store_true",
+        help=f"Read {name.replace('_', ' ')} from standard input",
+    )
+
+
+def _resolve_text_like_input(args: argparse.Namespace, name: str) -> str:
+    """Resolve a text argument supplied inline, via file, or via stdin."""
+    inline_value = getattr(args, name, None)
+    if inline_value is not None:
+        return inline_value
+
+    file_value = getattr(args, f"{name}_file", None)
+    if file_value is not None:
+        return file_value.read_text(encoding="utf-8")
+
+    if getattr(args, f"{name}_stdin", False):
+        return sys.stdin.read()
+
+    raise ValueError(f"Missing required input for {name}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Memory management operations")
     parser.add_argument(
@@ -2079,17 +2133,25 @@ def main():
                         help="Memory scope (default: user for all writes; project only for validate/curate/migrate)")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("validate", help="Validate MEMORY.md structure")
-    sub.add_parser("validate-sections", help="Validate per-section files")
+    validate_parser = sub.add_parser("validate", help="Validate MEMORY.md structure")
+    _add_scope_option(validate_parser)
+    validate_sections_parser = sub.add_parser("validate-sections", help="Validate per-section files")
+    _add_scope_option(validate_sections_parser)
 
     dup_parser = sub.add_parser("check-duplicate", help="Check for near-duplicates")
+    _add_scope_option(dup_parser)
     dup_parser.add_argument("--section", required=True,
                             choices=["experiences", "world_knowledge", "beliefs"])
-    dup_parser.add_argument("--candidate", required=True, help="Candidate text")
+    _add_text_like_input_options(
+        dup_parser,
+        name="candidate",
+        required_help="Candidate text",
+    )
     dup_parser.add_argument("--cross-scope", action="store_true",
                             help="Also check the other scope for duplicates")
 
     conf_parser = sub.add_parser("update-confidence", help="Update a confidence score")
+    _add_scope_option(conf_parser)
     conf_parser.add_argument("--section", required=True,
                              choices=["beliefs", "world_knowledge"])
     conf_parser.add_argument("--index", required=True, type=int)
@@ -2108,6 +2170,7 @@ def main():
         "preview-belief-decay",
         help="JSON: per-belief staleness/age and temporal decay delta if unsupported",
     )
+    _add_scope_option(pbd_parser)
     pbd_parser.add_argument(
         "--as-of",
         metavar="YYYY-MM-DD",
@@ -2116,16 +2179,27 @@ def main():
     )
 
     ent_parser = sub.add_parser("extract-entities", help="Extract entity candidates from text")
-    ent_parser.add_argument("--text", required=True)
+    _add_text_like_input_options(
+        ent_parser,
+        name="text",
+        required_help="Text to analyze",
+    )
 
     screen_parser = sub.add_parser("screen-text", help="Screen text for secrets or sensitive content")
-    screen_parser.add_argument("--text", required=True)
+    _add_text_like_input_options(
+        screen_parser,
+        name="text",
+        required_help="Text to screen",
+    )
 
     prune_parser = sub.add_parser("prune-beliefs", help="Find beliefs below confidence threshold")
+    _add_scope_option(prune_parser)
     prune_parser.add_argument("--threshold", type=float, default=0.2)
 
-    sub.add_parser("suggest-summaries", help="Suggest entities needing summaries")
-    sub.add_parser("check-conflicts", help="Detect contradictions between belief pairs")
+    suggest_parser = sub.add_parser("suggest-summaries", help="Suggest entities needing summaries")
+    _add_scope_option(suggest_parser)
+    conflicts_parser = sub.add_parser("check-conflicts", help="Detect contradictions between belief pairs")
+    _add_scope_option(conflicts_parser)
     sub.add_parser(
         "init-user",
         help="Idempotent: ensure user memory layout (same as automatic first-use init)",
@@ -2137,6 +2211,7 @@ def main():
                              help="Minimum similarity (default: 0.4, lower than dedup)")
 
     del_parser = sub.add_parser("delete-entry", help="Delete a specific memory entry by section and index")
+    _add_scope_option(del_parser)
     del_parser.add_argument("--section", required=True,
                             choices=["experiences", "world_knowledge", "beliefs", "reflections"])
     del_parser.add_argument("--index", required=True, type=int)
@@ -2205,6 +2280,7 @@ def main():
     )
 
     promote_parser = sub.add_parser("promote", help="Copy a memory from user to project scope")
+    _add_scope_option(promote_parser)
     promote_parser.add_argument("--section", required=True,
                                 choices=["experiences", "world_knowledge", "beliefs"])
     promote_parser.add_argument("--index", required=True, type=int,
@@ -2212,12 +2288,14 @@ def main():
     promote_parser.add_argument("--allow-project-promotion", action="store_true",
                                 help="Required explicit approval before writing to project memory")
 
-    sub.add_parser("migrate", help="Split a single-file MEMORY.md into per-section files")
+    migrate_parser = sub.add_parser("migrate", help="Split a single-file MEMORY.md into per-section files")
+    _add_scope_option(migrate_parser)
 
     curate_parser = sub.add_parser(
         "curate",
         help="Regenerate thin curated MEMORY.md (previews + links) from section files",
     )
+    _add_scope_option(curate_parser)
     curate_parser.add_argument("--max-world", type=int, default=5)
     curate_parser.add_argument("--max-beliefs", type=int, default=5)
     curate_parser.add_argument("--max-summaries", type=int, default=10)
@@ -2250,7 +2328,7 @@ def main():
         return resolve_path(scope)
 
     def effective_scope(default: str = "user") -> str:
-        return args.scope or default
+        return getattr(args, "command_scope", None) or args.scope or default
 
     if args.command == "validate":
         result = validate(get_path("project"))
@@ -2259,13 +2337,14 @@ def main():
     elif args.command == "check-duplicate":
         scope = effective_scope("user")
         target_path = _resolve_section_file_for_read(scope, args.section, args.file)
+        candidate = _resolve_text_like_input(args, "candidate")
         extra: Optional[list[tuple[str, Path]]] = None
         if getattr(args, "cross_scope", False):
             other_scope = "project" if scope == "user" else "user"
             other_path = _resolve_section_file_for_read(other_scope, args.section)
             if other_path.exists():
                 extra = [(other_scope, other_path)]
-        result = check_duplicate(target_path, args.section, args.candidate,
+        result = check_duplicate(target_path, args.section, candidate,
                                   extra_paths=extra)
     elif args.command == "update-confidence":
         scope = effective_scope("user")
@@ -2282,9 +2361,9 @@ def main():
         as_of = _parse_iso_date_string(args.as_of) if args.as_of else None
         result = preview_belief_temporal_decay(target, as_of=as_of)
     elif args.command == "extract-entities":
-        result = extract_entities(args.text)
+        result = extract_entities(_resolve_text_like_input(args, "text"))
     elif args.command == "screen-text":
-        result = screen_text(args.text)
+        result = screen_text(_resolve_text_like_input(args, "text"))
     elif args.command == "prune-beliefs":
         scope = effective_scope("user")
         target = _resolve_section_file_for_read(scope, "beliefs", args.file)
