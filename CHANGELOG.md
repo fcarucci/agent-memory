@@ -15,4 +15,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 
-- Canonical GitHub repo: **`fcarucci/agentic-memory`**. New project masters use **`# Agentic Memory`**; **`# Agent Memory`** remains accepted for existing files.
+- Canonical GitHub repo: **`fcarucci/agentic-memory`**. New project masters use **`# Agentic Memory`**.

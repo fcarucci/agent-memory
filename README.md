@@ -34,54 +34,13 @@ It is **not** a faithful reproduction of every detail in the paper; it is a **pr
 
 ## Install
 
-Requirements: **Python 3** available to the host that runs the skill’s stdlib helpers.
+At the project root:
 
-**Operators** only need to place this skill where the product loads skills from. **Routine memory use** (recall, remember, reflect, etc.) happens when the **agent** follows **`SKILL.md`**—you do not invoke helpers yourself. After [Install](#install), see [Using memory](#using-memory) for **phrases**, workflow, and wiring. **Configuration** and **Tests** below are for **integrators and maintainers** only. **User** memory under `~/.agents/memory/` is created automatically the first time recall or a write touches user scope (no manual initialization).
+```bash
+curl -fsSL https://github.com/fcarucci/agentic-memory/raw/main/install.sh | bash -s --
+```
 
-### Cursor
-
-1. Copy or clone this repository so the skill root (where `SKILL.md` lives) appears as:
-
-   **`.cursor/skills/memory/`**
-   i.e. `.cursor/skills/memory/SKILL.md`, `.cursor/skills/memory/scripts/`, etc.
-
-   Options:
-
-   - **Submodule (recommended for teams):** add this repo as a submodule at `skills/memory`, then symlink:
-
-     `ln -s ../../skills/memory .cursor/skills/memory`
-
-   - **Direct copy:** clone into `.cursor/skills/memory/` (contents at that folder's root, not nested `agentic-memory/SKILL.md`).
-
-2. Ensure **Agent Skills** loads project skills from `.cursor/skills/`.
-
-3. Point your **agent** instructions at **`SKILL.md`** (and optionally the [recommended `AGENTS.md` snippet](#recommended-agent-wiring-agentsmd)) so the agent performs recall and other memory actions—you do not invoke helpers yourself for day-to-day work.
-
-4. **Integrators only:** with [per-tool `hosts.*` blocks](#subagent-model-presets-memory-skillconfigjson), **`config-hints`** usually auto-selects **cursor** when Cursor-injected env vars are present; use **`MEMORY_SKILL_HOST=cursor`** or **`--host cursor`** only if inference is wrong (see **`ref/config.md`**).
-
-### OpenAI Codex (CLI / IDE)
-
-1. Clone this repository so the skill root (where `SKILL.md` lives) is at **`$CODEX_HOME/skills/memory`**:
-
-   ```bash
-   git clone git@github.com:fcarucci/agentic-memory.git "$CODEX_HOME/skills/memory"
-   ```
-
-2. With **`CODEX_HOME`** set, Codex loads skills from **`$CODEX_HOME/skills`** by default.
-
-3. Use memory by having the **agent** follow **`SKILL.md`**. The agent runs the skill’s helpers in the right context for your project; you do not invoke them manually for normal work.
-
-4. **Integrators only:** for **Codex**, set **`MEMORY_SKILL_HOST=codex`** or pass **`--host codex`** to **config-hints** (auto-detection for Codex is not available yet). See [Subagent model presets](#subagent-model-presets-memory-skillconfigjson).
-
-### Claude (Claude Code / team setups)
-
-1. Copy or symlink this repository so the skill root lives at **`.claude/skills/memory/`** (i.e. `.claude/skills/memory/SKILL.md`, `scripts/`, etc.).
-
-2. Ensure Claude Code (or your team harness) loads skills from **`.claude/skills/`**.
-
-3. Use memory **only through the skill:** point **agent** rules at **`SKILL.md`** (and the [recommended `AGENTS.md` snippet](#recommended-agent-wiring-agentsmd) if you use that pattern). The **agent** follows the skill when **`SKILL.md`** says to—same model as Cursor and Codex. Do not invoke the skill’s helpers yourself for routine memory work.
-
-4. **Integrators only:** **Claude Code** sets **`CLAUDECODE`** in spawned shells, so **`config-hints`** typically auto-merges **`hosts.claude`** without extra env. Override with **`MEMORY_SKILL_HOST`** if needed (see [Subagent model presets](#subagent-model-presets-memory-skillconfigjson)).
+Day-to-day use is through your agent and **`SKILL.md`** (see [Using memory](#using-memory)). **Configuration** and **Tests** below are for integrators. User memory under `~/.agents/memory/` is created on first use.
 
 ## File layout
 
